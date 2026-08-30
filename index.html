@@ -7,6 +7,8 @@
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Библиотека генерации Excel на клиенте -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
   <style>
     body {
       background: #f0f4f8;
@@ -237,12 +239,35 @@
 
     function exportToExcel() {
       haptic('medium');
-      if (db.length === 0) {
-        Telegram.WebApp.showAlert('История пуста. Добавьте записи перед экспортом.');
+      if (!db || db.length === 0) {
+        Telegram.WebApp.showAlert('История пуста. Сначала добавьте хотя бы одну запись.');
         return;
       }
-      // Отправка данных боту для генерации Excel
-      Telegram.WebApp.sendData(JSON.stringify({ action: "export_excel", logs: db }));
+
+      try {
+        // Подготовка строк таблицы
+        const rows = db.map((item, idx) => {
+          const d = new Date(item.date);
+          return {
+            "№": idx + 1,
+            "Дата": d.toLocaleDateString('ru-RU'),
+            "Время": d.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'}),
+            "Одометр (км)": Number(item.odo),
+            "Заряжено (кВт⋅ч)": Number(item.kwh),
+            "Стоимость (₽)": Number(item.price)
+          };
+        });
+
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Журнал зарядок");
+
+        // Прямое скачивание xlsx файла
+        XLSX.writeFile(wb, `EV_Garage_Geely_EX5_${new Date().toISOString().slice(0,10)}.xlsx`);
+        haptic('success');
+      } catch (err) {
+        Telegram.WebApp.showAlert('Ошибка при экспорте: ' + err.message);
+      }
     }
 
     function clearData() {
