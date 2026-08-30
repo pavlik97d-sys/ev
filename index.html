@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>EV Garage</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-white p-4 font-sans select-none min-h-screen">
+  <script>window.Telegram.WebApp.expand();</script>
+  <div class="flex items-center justify-between mb-4">
+    <h1 class="text-xl font-bold">⚡ Geely EX5 EM-i</h1>
+    <span class="text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-1 rounded-md">Онлайн</span>
+  </div>
+
+  <div class="grid grid-cols-2 gap-2 mb-4">
+    <div class="bg-slate-800 p-3 rounded-xl border border-slate-700">
+      <div class="text-xs text-slate-400">Ср. расход</div>
+      <div id="cons" class="text-lg font-bold text-emerald-400">0.0 кВт⋅ч</div>
+    </div>
+    <div class="bg-slate-800 p-3 rounded-xl border border-slate-700">
+      <div class="text-xs text-slate-400">Всего затрат</div>
+      <div id="cost" class="text-lg font-bold text-amber-400">0 ₽</div>
+    </div>
+  </div>
+
+  <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-4 space-y-3">
+    <div class="text-sm font-semibold">Новая зарядка</div>
+    <input id="odo" type="number" placeholder="Текущий пробег (км)" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white outline-none focus:border-emerald-500">
+    <input id="kwh" type="number" step="any" placeholder="Залито кВт⋅ч" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white outline-none focus:border-emerald-500">
+    <input id="price" type="number" step="any" placeholder="Стоимость (₽)" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white outline-none focus:border-emerald-500">
+    <button onclick="saveData()" class="w-full bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 font-bold py-2.5 rounded-lg text-sm transition">💾 Записать в журнал</button>
+  </div>
+
+  <div class="text-xs text-slate-400 mb-2 font-semibold uppercase tracking-wider">История зарядок</div>
+  <div id="list" class="space-y-2"></div>
+
+  <script>
+    let db = JSON.parse(localStorage.getItem('ev_logs') || '[]');
+    function render() {
+      const list = document.getElementById('list');
+      let totalCost = 0;
+      let totalKwh = 0;
+      
+      if (!db.length) {
+        list.innerHTML = '<div class="text-xs text-slate-500 text-center py-4">Нет сохраненных записей</div>';
+        document.getElementById('cost').innerText = '0 ₽';
+        document.getElementById('cons').innerText = '0.0 кВт⋅ч';
+        return;
+      }
+
+      db.forEach(item => {
+        totalCost += parseFloat(item.price || 0);
+        totalKwh += parseFloat(item.kwh || 0);
+      });
+
+      document.getElementById('cost').innerText = Math.round(totalCost) + ' ₽';
+      if (db.length >= 2) {
+        const dist = Math.max(...db.map(i => i.odo)) - Math.min(...db.map(i => i.odo));
+        const avg = dist > 0 ? ((totalKwh / dist) * 100).toFixed(1) : '0.0';
+        document.getElementById('cons').innerText = avg + ' кВт⋅ч';
+      }
+
+      list.innerHTML = db.slice().reverse().slice(0, 5).map(item => `
+        <div class="bg-slate-800 p-2.5 rounded-lg border border-slate-700 flex justify-between items-center text-xs">
+          <div>
+            <div class="font-bold text-white">${item.odo} км</div>
+            <div class="text-slate-400 text-[10px]">${item.date}</div>
+          </div>
+          <div class="text-right">
+            <div class="font-bold text-emerald-400">+${item.kwh} кВт⋅ч</div>
+            <div class="text-amber-400 font-medium">${item.price} ₽</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function saveData() {
+      const odo = document.getElementById('odo').value;
+      const kwh = document.getElementById('kwh').value;
+      const price = document.getElementById('price').value || 0;
+      if (!odo || !kwh) {
+        Telegram.WebApp.showAlert('Заполните пробег и кВт⋅ч!');
+        return;
+      }
+      const now = new Date();
+      const dateStr = now.toLocaleDateString('ru-RU', {day:'2-digit', month:'2-digit'}) + ' ' + now.toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'});
+      db.push({odo: parseFloat(odo), kwh: parseFloat(kwh), price: parseFloat(price), date: dateStr});
+      localStorage.setItem('ev_logs', JSON.stringify(db));
+      document.getElementById('odo').value = '';
+      document.getElementById('kwh').value = '';
+      document.getElementById('price').value = '';
+      render();
+      try { Telegram.WebApp.HapticFeedback.notificationOccurred('success'); } catch(e){}
+    }
+    render();
+  </script>
+</body>
+</html>
