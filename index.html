@@ -3,77 +3,169 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>EV Garage</title>
+  <title>EV Статистика</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      background: radial-gradient(circle at top, #0d233a 0%, #08111d 100%);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .card-glass {
+      background: rgba(14, 30, 50, 0.75);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+    }
+    .glow-cyan {
+      box-shadow: 0 0 20px rgba(6, 182, 212, 0.15);
+    }
+  </style>
 </head>
-<body class="bg-slate-900 text-white p-4 font-sans select-none min-h-screen">
+<body class="text-white p-3.5 select-none min-h-screen pb-10">
   <script>window.Telegram.WebApp.expand();</script>
-  <div class="flex items-center justify-between mb-4">
-    <h1 class="text-xl font-bold">⚡ Geely EX5 EM-i</h1>
-    <span class="text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-1 rounded-md">Онлайн</span>
-  </div>
 
-  <div class="grid grid-cols-2 gap-2 mb-4">
-    <div class="bg-slate-800 p-3 rounded-xl border border-slate-700">
-      <div class="text-xs text-slate-400">Ср. расход</div>
-      <div id="cons" class="text-lg font-bold text-emerald-400">0.0 кВт⋅ч</div>
+  <!-- Приветственная плашка Telegram -->
+  <div class="card-glass rounded-2xl p-3 mb-3 flex items-center justify-between text-xs text-slate-300">
+    <div>
+      <span class="font-bold text-cyan-400">📊 Сводка обновлена:</span> <span id="sync-time">Сейчас</span>
+      <div class="text-[11px] text-slate-400">⚡ Geely EX5 EM-i • 18.4 кВт⋅ч</div>
     </div>
-    <div class="bg-slate-800 p-3 rounded-xl border border-slate-700">
-      <div class="text-xs text-slate-400">Всего затрат</div>
-      <div id="cost" class="text-lg font-bold text-amber-400">0 ₽</div>
+    <span class="bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-2 py-0.5 rounded-full text-[10px] font-bold">ONLINE</span>
+  </div>
+
+  <!-- Главная сетка виджетов -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+    
+    <!-- Левый виджет: Круговой спидометр заряда -->
+    <div class="card-glass rounded-2xl p-4 flex flex-col items-center justify-between glow-cyan relative">
+      <div class="text-xs uppercase font-bold tracking-wider text-cyan-400 flex items-center gap-1">
+        📈 ОБЩАЯ СТАТИСТИКА
+      </div>
+      
+      <div class="relative w-36 h-36 my-2 flex items-center justify-center">
+        <svg class="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+          <path class="text-slate-800" stroke-width="3.5" stroke="currentColor" fill="none"
+            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+          <path class="text-emerald-400" stroke-width="3.5" stroke-dasharray="78, 100" stroke-linecap="round" stroke="currentColor" fill="none"
+            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+        </svg>
+        <div class="absolute flex flex-col items-center">
+          <span id="soc-val" class="text-3xl font-black text-white">78%</span>
+          <span class="text-[9px] text-slate-400">Батарея</span>
+        </div>
+      </div>
+
+      <div class="w-full text-center text-xs text-slate-300 border-t border-slate-800 pt-2">
+        <div class="text-[11px] text-slate-400">Последняя зарядка:</div>
+        <div class="font-semibold text-emerald-400">🔋 +14.2 кВт⋅ч | 3.5 кВт AC</div>
+      </div>
+    </div>
+
+    <!-- Правый виджет: График по дням недели -->
+    <div class="card-glass rounded-2xl p-4 flex flex-col justify-between glow-cyan">
+      <div class="flex justify-between items-start mb-2">
+        <div>
+          <div class="text-xs uppercase font-bold tracking-wider text-emerald-400">📊 ИСТОРИЯ ЗАВЕРШЕНИЙ</div>
+          <div id="stat-summary" class="text-[11px] text-slate-300">0 кВт⋅ч / 0 км / 0 сессий</div>
+        </div>
+      </div>
+      
+      <div class="h-32 w-full">
+        <canvas id="barChart"></canvas>
+      </div>
     </div>
   </div>
 
-  <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-4 space-y-3">
-    <div class="text-sm font-semibold">Новая зарядка</div>
-    <input id="odo" type="number" placeholder="Текущий пробег (км)" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white outline-none focus:border-emerald-500">
-    <input id="kwh" type="number" step="any" placeholder="Залито кВт⋅ч" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white outline-none focus:border-emerald-500">
-    <input id="price" type="number" step="any" placeholder="Стоимость (₽)" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white outline-none focus:border-emerald-500">
-    <button onclick="saveData()" class="w-full bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 font-bold py-2.5 rounded-lg text-sm transition">💾 Записать в журнал</button>
+  <!-- Виджет текущей зарядки -->
+  <div class="card-glass rounded-2xl p-3.5 mb-3 border-emerald-500/30">
+    <div class="flex items-center justify-between text-xs font-bold text-amber-400 mb-1.5">
+      <div class="flex items-center gap-1.5">
+        <span class="animate-pulse">⚡</span> Текущий статус авто
+      </div>
+      <span class="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded">В паркинге</span>
+    </div>
+    <div class="text-xs text-slate-200">
+      <strong>Geely EX5 EM-i</strong>: запас хода <span class="text-emerald-400 font-bold">~85 км (EV)</span>
+    </div>
+    <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden mt-2">
+      <div class="bg-gradient-to-r from-emerald-500 to-cyan-400 h-full w-[78%]"></div>
+    </div>
   </div>
 
-  <div class="text-xs text-slate-400 mb-2 font-semibold uppercase tracking-wider">История зарядок</div>
-  <div id="list" class="space-y-2"></div>
+  <!-- Форма добавления зарядки -->
+  <div class="card-glass rounded-2xl p-4 mb-3 space-y-2.5">
+    <div class="text-xs font-bold uppercase tracking-wider text-cyan-400">➕ Новая запись в журнал</div>
+    <div class="grid grid-cols-2 gap-2">
+      <input id="odo" type="number" placeholder="Пробег (км)" class="bg-slate-900/80 border border-slate-700 rounded-xl p-2 text-xs text-white outline-none focus:border-cyan-400">
+      <input id="kwh" type="number" step="any" placeholder="Залито (кВт⋅ч)" class="bg-slate-900/80 border border-slate-700 rounded-xl p-2 text-xs text-white outline-none focus:border-cyan-400">
+    </div>
+    <input id="price" type="number" step="any" placeholder="Стоимость (₽)" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl p-2 text-xs text-white outline-none focus:border-cyan-400">
+    <button onclick="saveData()" class="w-full bg-gradient-to-r from-cyan-600 to-emerald-600 hover:opacity-90 active:scale-95 font-bold py-2.5 rounded-xl text-xs uppercase tracking-wider transition">
+      💾 Записать данные
+    </button>
+  </div>
+
+  <!-- Нижние кнопки быстрых действий -->
+  <div class="grid grid-cols-4 gap-2 text-[11px] font-medium text-center">
+    <button onclick="location.reload()" class="card-glass p-2 rounded-xl hover:bg-slate-800 flex flex-col items-center gap-1">
+      🔄 <span>Обновить</span>
+    </button>
+    <button onclick="Telegram.WebApp.showAlert('Всего сохранено записей: ' + db.length)" class="card-glass p-2 rounded-xl hover:bg-slate-800 flex flex-col items-center gap-1">
+      📈 <span>Отчеты</span>
+    </button>
+    <button onclick="Telegram.WebApp.showAlert('Ближайшие ЭЗС: 220В Домашняя, 3.5 кВт / 7 кВт')" class="card-glass p-2 rounded-xl hover:bg-slate-800 flex flex-col items-center gap-1">
+      🗺 <span>Карта</span>
+    </button>
+    <button onclick="clearData()" class="card-glass p-2 rounded-xl hover:bg-slate-800 flex flex-col items-center gap-1 text-rose-400">
+      ⚙️ <span>Сброс</span>
+    </button>
+  </div>
 
   <script>
     let db = JSON.parse(localStorage.getItem('ev_logs') || '[]');
-    function render() {
-      const list = document.getElementById('list');
-      let totalCost = 0;
-      let totalKwh = 0;
-      
-      if (!db.length) {
-        list.innerHTML = '<div class="text-xs text-slate-500 text-center py-4">Нет сохраненных записей</div>';
-        document.getElementById('cost').innerText = '0 ₽';
-        document.getElementById('cons').innerText = '0.0 кВт⋅ч';
-        return;
-      }
+    let chartInstance = null;
 
-      db.forEach(item => {
-        totalCost += parseFloat(item.price || 0);
-        totalKwh += parseFloat(item.kwh || 0);
+    function initChart() {
+      const ctx = document.getElementById('barChart').getContext('2d');
+      chartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'],
+          datasets: [{
+            data: [12, 18, 5, 22, 14, 8, 16],
+            backgroundColor: 'rgba(52, 211, 153, 0.8)',
+            borderRadius: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { size: 9 } } },
+            y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8', font: { size: 9 } } }
+          }
+        }
+      });
+    }
+
+    function render() {
+      let totalKwh = 0;
+      let totalCost = 0;
+      
+      db.forEach(i => {
+        totalKwh += parseFloat(i.kwh || 0);
+        totalCost += parseFloat(i.price || 0);
       });
 
-      document.getElementById('cost').innerText = Math.round(totalCost) + ' ₽';
+      let dist = 0;
       if (db.length >= 2) {
-        const dist = Math.max(...db.map(i => i.odo)) - Math.min(...db.map(i => i.odo));
-        const avg = dist > 0 ? ((totalKwh / dist) * 100).toFixed(1) : '0.0';
-        document.getElementById('cons').innerText = avg + ' кВт⋅ч';
+        dist = Math.max(...db.map(i => i.odo)) - Math.min(...db.map(i => i.odo));
       }
 
-      list.innerHTML = db.slice().reverse().slice(0, 5).map(item => `
-        <div class="bg-slate-800 p-2.5 rounded-lg border border-slate-700 flex justify-between items-center text-xs">
-          <div>
-            <div class="font-bold text-white">${item.odo} км</div>
-            <div class="text-slate-400 text-[10px]">${item.date}</div>
-          </div>
-          <div class="text-right">
-            <div class="font-bold text-emerald-400">+${item.kwh} кВт⋅ч</div>
-            <div class="text-amber-400 font-medium">${item.price} ₽</div>
-          </div>
-        </div>
-      `).join('');
+      document.getElementById('stat-summary').innerText = `${totalKwh.toFixed(1)} кВт⋅ч / ${dist} км / ${db.length} сессий`;
+      document.getElementById('sync-time').innerText = new Date().toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'});
     }
 
     function saveData() {
@@ -84,9 +176,7 @@
         Telegram.WebApp.showAlert('Заполните пробег и кВт⋅ч!');
         return;
       }
-      const now = new Date();
-      const dateStr = now.toLocaleDateString('ru-RU', {day:'2-digit', month:'2-digit'}) + ' ' + now.toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'});
-      db.push({odo: parseFloat(odo), kwh: parseFloat(kwh), price: parseFloat(price), date: dateStr});
+      db.push({ odo: parseFloat(odo), kwh: parseFloat(kwh), price: parseFloat(price), date: new Date().toISOString() });
       localStorage.setItem('ev_logs', JSON.stringify(db));
       document.getElementById('odo').value = '';
       document.getElementById('kwh').value = '';
@@ -94,6 +184,16 @@
       render();
       try { Telegram.WebApp.HapticFeedback.notificationOccurred('success'); } catch(e){}
     }
+
+    function clearData() {
+      if (confirm('Очистить историю?')) {
+        localStorage.removeItem('ev_logs');
+        db = [];
+        render();
+      }
+    }
+
+    initChart();
     render();
   </script>
 </body>
