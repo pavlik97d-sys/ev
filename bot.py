@@ -7,7 +7,7 @@ import telebot
 from telebot import types
 
 TOKEN = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU'
-WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=5'
+WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=6'
 
 # Веб-сервер для бесплатного тарифа Render
 class SimpleHandler(http.server.SimpleHTTPRequestHandler):
