@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>EV Статистика</title>
+  <title>EV Статистика & Гараж</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -23,22 +23,41 @@
     }
   </style>
 </head>
-<body class="p-3.5 select-none min-h-screen pb-10">
+<body class="p-3.5 select-none min-h-screen pb-12">
   <script>window.Telegram.WebApp.expand();</script>
 
-  <!-- Инфо-плашка -->
-  <div class="card-clean rounded-2xl p-3 mb-3 flex items-center justify-between text-xs text-slate-500">
-    <div>
-      <span class="font-bold text-blue-600">📊 Сводка обновлена:</span> <span id="sync-time" class="text-slate-700">--:--</span>
-      <div class="text-[11px] text-slate-400">⚡ Geely EX5 EM-i • 18.7 кВт⋅ч</div>
+  <!-- Селектор гаража и кнопки подключения -->
+  <div class="card-clean rounded-2xl p-3 mb-3">
+    <div class="flex items-center justify-between gap-2 mb-2">
+      <div class="flex-1">
+        <label class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Текущее авто:</label>
+        <select id="carSelect" onchange="switchCar(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-bold text-blue-700 outline-none focus:border-blue-500">
+        </select>
+      </div>
+      <div class="flex gap-1 pt-4">
+        <button onclick="openNewCarModal()" title="Добавить авто" class="bg-blue-50 hover:bg-blue-100 text-blue-600 p-2 rounded-xl text-xs font-bold border border-blue-200 active:scale-95 transition">
+          ➕ Авто
+        </button>
+        <button onclick="openJoinModal()" title="Подключиться по коду" class="bg-slate-50 hover:bg-slate-100 text-slate-700 p-2 rounded-xl text-xs font-bold border border-slate-200 active:scale-95 transition">
+          🔗 Код
+        </button>
+      </div>
     </div>
-    <span class="bg-blue-50 text-blue-600 border border-blue-200 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider">ONLINE</span>
+
+    <!-- Инфо-строка -->
+    <div class="flex items-center justify-between text-[11px] text-slate-500 border-t border-slate-100 pt-2">
+      <div>
+        <span class="font-bold text-blue-600">Код авто:</span> <span id="current-car-code" class="font-mono font-bold text-slate-800 select-all">------</span>
+        <button onclick="copyCarCode()" class="ml-1 text-[10px] text-blue-500 underline">копировать</button>
+      </div>
+      <span class="bg-blue-50 text-blue-600 border border-blue-200 px-2 py-0.5 rounded-full text-[10px] font-bold">ONLINE</span>
+    </div>
   </div>
 
   <!-- Главные виджеты -->
   <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
     
-    <!-- Левый виджет: Круговой индикатор -->
+    <!-- Круговой индикатор -->
     <div class="card-clean rounded-2xl p-4 flex flex-col items-center justify-between relative">
       <div class="text-xs uppercase font-bold tracking-wider text-blue-600 flex items-center gap-1">
         📈 ОБЩАЯ СТАТИСТИКА
@@ -63,7 +82,7 @@
       </div>
     </div>
 
-    <!-- Правый виджет: График по дням недели -->
+    <!-- График по дням недели -->
     <div class="card-clean rounded-2xl p-4 flex flex-col justify-between">
       <div class="flex justify-between items-start mb-2">
         <div>
@@ -78,13 +97,13 @@
     </div>
   </div>
 
-  <!-- Статус авто -->
+  <!-- Статус эффективности -->
   <div class="card-clean rounded-2xl p-3.5 mb-3 border-blue-100 bg-gradient-to-r from-blue-50/50 to-white">
     <div class="flex items-center justify-between text-xs font-bold text-blue-700 mb-1.5">
       <div class="flex items-center gap-1.5">
-        <span>⚡</span> Средняя энергоэффективность
+        <span>⚡</span> Энергоэффективность
       </div>
-      <span class="text-[10px] bg-white text-blue-700 border border-blue-200 px-2 py-0.5 rounded shadow-sm">Geely EX5</span>
+      <span id="car-badge-name" class="text-[10px] bg-white text-blue-700 border border-blue-200 px-2 py-0.5 rounded shadow-sm">Авто</span>
     </div>
     <div class="text-xs text-slate-600">
       Средний расход: <span id="avg-cons" class="text-blue-700 font-bold">0.0 кВт⋅ч/100км</span>
@@ -109,7 +128,7 @@
 
   <!-- Нижняя панель действий -->
   <div class="grid grid-cols-4 gap-2 text-[11px] font-medium text-center">
-    <button onclick="haptic('medium'); location.reload();" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-slate-600">
+    <button onclick="haptic('medium'); syncCloud();" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-slate-600">
       🔄 <span>Обновить</span>
     </button>
     <button onclick="openExportModal()" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-blue-600">
@@ -123,30 +142,80 @@
     </button>
   </div>
 
-  <!-- Модальное окно экспорта -->
+  <!-- Модалка: Создать новое авто -->
+  <div id="newCarModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-sm rounded-2xl p-4 shadow-2xl border border-slate-100">
+      <h3 class="text-sm font-bold text-blue-600 mb-2">➕ Добавить автомобиль в гараж</h3>
+      <div class="space-y-2 mb-3">
+        <input id="newCarName" type="text" placeholder="Модель (например, Geely EX5)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs outline-none focus:border-blue-500">
+        <input id="newCarCap" type="number" step="any" placeholder="Емкость батареи (кВт⋅ч, например 18.7)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs outline-none focus:border-blue-500">
+      </div>
+      <div class="flex gap-2">
+        <button onclick="createNewCar()" class="flex-1 accent-blue text-white py-2.5 rounded-xl text-xs font-bold active:scale-95 transition">Создать</button>
+        <button onclick="closeModals()" class="px-4 bg-slate-100 text-slate-600 py-2.5 rounded-xl text-xs font-bold">Отмена</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модалка: Подключиться по коду -->
+  <div id="joinModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-sm rounded-2xl p-4 shadow-2xl border border-slate-100">
+      <h3 class="text-sm font-bold text-blue-600 mb-2">🔗 Подключиться к общему авто</h3>
+      <p class="text-[11px] text-slate-500 mb-2">Введите код доступа, полученный от второго водителя:</p>
+      <input id="joinCodeInput" type="text" placeholder="Код (например, EX5-8421)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono uppercase mb-3 outline-none focus:border-blue-500">
+      <div class="flex gap-2">
+        <button onclick="joinCarByCode()" class="flex-1 accent-blue text-white py-2.5 rounded-xl text-xs font-bold active:scale-95 transition">Подключить</button>
+        <button onclick="closeModals()" class="px-4 bg-slate-100 text-slate-600 py-2.5 rounded-xl text-xs font-bold">Отмена</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модалка экспорта -->
   <div id="exportModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
     <div class="bg-white w-full max-w-sm rounded-2xl p-4 shadow-2xl border border-slate-100 flex flex-col">
       <div class="flex justify-between items-center mb-2">
         <h3 class="text-sm font-bold text-blue-600">📊 Экспорт данных (Excel)</h3>
-        <button onclick="closeExportModal()" class="text-slate-400 hover:text-slate-600 text-lg font-bold">✕</button>
+        <button onclick="closeModals()" class="text-slate-400 hover:text-slate-600 text-lg font-bold">✕</button>
       </div>
-      <p class="text-[11px] text-slate-500 mb-2">Нажмите кнопку ниже, чтобы скопировать готовую таблицу со всеми расчетами:</p>
       <textarea id="exportText" readonly class="w-full h-36 bg-slate-50 border border-slate-200 rounded-xl p-2 text-[10px] font-mono text-slate-700 outline-none mb-3"></textarea>
       <div class="flex gap-2">
-        <button onclick="copyExportData()" class="flex-1 accent-blue text-white py-2.5 rounded-xl text-xs font-bold active:scale-95 transition">
-          📋 Скопировать всё
-        </button>
-        <button onclick="closeExportModal()" class="px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 py-2.5 rounded-xl text-xs font-bold">
-          Закрыть
-        </button>
+        <button onclick="copyExportData()" class="flex-1 accent-blue text-white py-2.5 rounded-xl text-xs font-bold active:scale-95 transition">📋 Скопировать</button>
+        <button onclick="closeModals()" class="px-4 bg-slate-100 text-slate-600 py-2.5 rounded-xl text-xs font-bold">Закрыть</button>
       </div>
     </div>
   </div>
 
   <script>
-    const BATTERY_CAP = 18.7;
-    let db = JSON.parse(localStorage.getItem('ev_logs') || '[]');
+    // Структура гаража: массив автомобилей
+    let garage = JSON.parse(localStorage.getItem('ev_garage') || '[]');
+    let currentCarId = localStorage.getItem('ev_current_car_id') || '';
     let chartInstance = null;
+
+    // Инициализация гаража по умолчанию, если пуст
+    if (garage.length === 0) {
+      const defaultCar = {
+        id: 'EX5-' + Math.floor(1000 + Math.random() * 9000),
+        name: 'Geely EX5 EM-i',
+        capacity: 18.7,
+        logs: JSON.parse(localStorage.getItem('ev_logs') || '[]')
+      };
+      garage.push(defaultCar);
+      currentCarId = defaultCar.id;
+      saveGarage();
+    }
+
+    if (!currentCarId && garage.length > 0) {
+      currentCarId = garage[0].id;
+    }
+
+    function getCurrentCar() {
+      return garage.find(c => c.id === currentCarId) || garage[0];
+    }
+
+    function saveGarage() {
+      localStorage.setItem('ev_garage', JSON.stringify(garage));
+      localStorage.setItem('ev_current_car_id', currentCarId);
+    }
 
     function haptic(type) {
       try {
@@ -155,6 +224,100 @@
         if (type === 'success') Telegram.WebApp.HapticFeedback.notificationOccurred('success');
         if (type === 'warning') Telegram.WebApp.HapticFeedback.notificationOccurred('warning');
       } catch(e){}
+    }
+
+    function populateCarSelect() {
+      const select = document.getElementById('carSelect');
+      select.innerHTML = '';
+      garage.forEach(car => {
+        const opt = document.createElement('option');
+        opt.value = car.id;
+        opt.innerText = `${car.name} (${car.capacity} кВт⋅ч)`;
+        if (car.id === currentCarId) opt.selected = true;
+        select.appendChild(opt);
+      });
+      const car = getCurrentCar();
+      document.getElementById('current-car-code').innerText = car.id;
+      document.getElementById('car-badge-name').innerText = car.name;
+    }
+
+    function switchCar(carId) {
+      haptic('light');
+      currentCarId = carId;
+      saveGarage();
+      populateCarSelect();
+      render();
+    }
+
+    function openNewCarModal() {
+      haptic('medium');
+      document.getElementById('newCarModal').classList.remove('hidden');
+    }
+
+    function openJoinModal() {
+      haptic('medium');
+      document.getElementById('joinModal').classList.remove('hidden');
+    }
+
+    function closeModals() {
+      document.getElementById('newCarModal').classList.add('hidden');
+      document.getElementById('joinModal').classList.add('hidden');
+      document.getElementById('exportModal').classList.add('hidden');
+    }
+
+    function createNewCar() {
+      const name = document.getElementById('newCarName').value.trim();
+      const cap = parseFloat(document.getElementById('newCarCap').value);
+      if (!name || isNaN(cap) || cap <= 0) {
+        Telegram.WebApp.showAlert('Заполните название и емкость батареи!');
+        return;
+      }
+      const newCar = {
+        id: 'CAR-' + Math.floor(1000 + Math.random() * 9000),
+        name: name,
+        capacity: cap,
+        logs: []
+      };
+      garage.push(newCar);
+      currentCarId = newCar.id;
+      saveGarage();
+      closeModals();
+      populateCarSelect();
+      render();
+      Telegram.WebApp.showAlert(`✅ Автомобиль "${name}" добавлен в гараж!`);
+    }
+
+    function joinCarByCode() {
+      const code = document.getElementById('joinCodeInput').value.trim().toUpperCase();
+      if (!code) {
+        Telegram.WebApp.showAlert('Введите код доступа!');
+        return;
+      }
+      // Если такого авто нет, создаем локальную запись под этот код
+      let existing = garage.find(c => c.id === code);
+      if (!existing) {
+        existing = {
+          id: code,
+          name: 'Общее авто (' + code + ')',
+          capacity: 18.7,
+          logs: []
+        };
+        garage.push(existing);
+      }
+      currentCarId = code;
+      saveGarage();
+      closeModals();
+      populateCarSelect();
+      render();
+      Telegram.WebApp.showAlert(`✅ Успешно подключено к авто с кодом ${code}!`);
+    }
+
+    function copyCarCode() {
+      haptic('light');
+      const code = getCurrentCar().id;
+      navigator.clipboard.writeText(code).then(() => {
+        Telegram.WebApp.showAlert(`Код авто ${code} скопирован! Отправьте его второму водителю.`);
+      });
     }
 
     function initChart() {
@@ -182,11 +345,13 @@
     }
 
     function render() {
+      const car = getCurrentCar();
+      const logs = car.logs || [];
       let totalKwh = 0;
       let totalCost = 0;
       let weekdayKwh = [0, 0, 0, 0, 0, 0, 0];
 
-      db.forEach(i => {
+      logs.forEach(i => {
         const kwh = parseFloat(i.kwh || 0);
         totalKwh += kwh;
         totalCost += parseFloat(i.totalPrice || i.price || 0);
@@ -204,20 +369,19 @@
       }
 
       let dist = 0;
-      if (db.length >= 2) {
-        dist = Math.max(...db.map(i => i.odo)) - Math.min(...db.map(i => i.odo));
+      if (logs.length >= 2) {
+        dist = Math.max(...logs.map(i => i.odo)) - Math.min(...logs.map(i => i.odo));
         const avg = dist > 0 ? ((totalKwh / dist) * 100).toFixed(1) : '0.0';
         document.getElementById('avg-cons').innerText = `${avg} кВт⋅ч/100км`;
       } else {
         document.getElementById('avg-cons').innerText = `0.0 кВт⋅ч/100км`;
       }
 
-      document.getElementById('stat-summary').innerText = `${totalKwh.toFixed(1)} кВт⋅ч / ${dist} км / ${db.length} сессий`;
-      document.getElementById('sync-time').innerText = new Date().toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'});
+      document.getElementById('stat-summary').innerText = `${totalKwh.toFixed(1)} кВт⋅ч / ${dist} км / ${logs.length} сессий`;
 
-      if (db.length > 0) {
-        const last = db[db.length - 1];
-        const percent = Math.min(100, Math.round((last.kwh / BATTERY_CAP) * 100));
+      if (logs.length > 0) {
+        const last = logs[logs.length - 1];
+        const percent = Math.min(100, Math.round((last.kwh / (car.capacity || 18.7)) * 100));
         const cost = last.totalPrice ? Math.round(last.totalPrice) : Math.round(last.price || 0);
         document.getElementById('soc-val').innerText = `${percent}%`;
         document.getElementById('circle-bar').setAttribute('stroke-dasharray', `${percent}, 100`);
@@ -245,8 +409,9 @@
       const kwhVal = parseFloat(kwh);
       const rateVal = parseFloat(rate);
       const totalPrice = parseFloat((kwhVal * rateVal).toFixed(2));
+      const car = getCurrentCar();
 
-      db.push({
+      car.logs.push({
         odo: parseFloat(odo),
         kwh: kwhVal,
         rate: rateVal,
@@ -255,7 +420,7 @@
         date: new Date().toISOString()
       });
 
-      localStorage.setItem('ev_logs', JSON.stringify(db));
+      saveGarage();
       document.getElementById('odo').value = '';
       document.getElementById('kwh').value = '';
       document.getElementById('rate').value = '';
@@ -265,20 +430,24 @@
 
     function showReport() {
       haptic('light');
-      let totalCost = db.reduce((acc, i) => acc + parseFloat(i.totalPrice || i.price || 0), 0);
-      let totalKwh = db.reduce((acc, i) => acc + parseFloat(i.kwh || 0), 0);
-      Telegram.WebApp.showAlert(`Всего сессий: ${db.length}\nПринято энергии: ${totalKwh.toFixed(1)} кВт⋅ч\nОбщие затраты: ${Math.round(totalCost)} ₽`);
+      const car = getCurrentCar();
+      const logs = car.logs || [];
+      let totalCost = logs.reduce((acc, i) => acc + parseFloat(i.totalPrice || i.price || 0), 0);
+      let totalKwh = logs.reduce((acc, i) => acc + parseFloat(i.kwh || 0), 0);
+      Telegram.WebApp.showAlert(`Авто: ${car.name}\nВсего сессий: ${logs.length}\nПринято энергии: ${totalKwh.toFixed(1)} кВт⋅ч\nЗатраты: ${Math.round(totalCost)} ₽`);
     }
 
     function openExportModal() {
       haptic('medium');
-      if (!db || db.length === 0) {
-        Telegram.WebApp.showAlert('История пуста. Сначала сохраните хотя бы одну сессию.');
+      const car = getCurrentCar();
+      const logs = car.logs || [];
+      if (logs.length === 0) {
+        Telegram.WebApp.showAlert('История пуста для этого авто.');
         return;
       }
 
-      let tableText = "Дата\tВремя\tТекущий пробег (км)\tЗаряжено (кВт⋅ч)\tТариф (₽/кВт⋅ч)\tИтого (₽)\n";
-      db.forEach(item => {
+      let tableText = `Отчет: ${car.name} (Код: ${car.id})\nДата\tВремя\tТекущий пробег (км)\tЗаряжено (кВт⋅ч)\tТариф (₽/кВт⋅ч)\tИтого (₽)\n`;
+      logs.forEach(item => {
         const d = new Date(item.date);
         const dateStr = d.toLocaleDateString('ru-RU');
         const timeStr = d.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'});
@@ -291,39 +460,30 @@
       document.getElementById('exportModal').classList.remove('hidden');
     }
 
-    function closeExportModal() {
-      document.getElementById('exportModal').classList.add('hidden');
-    }
-
     function copyExportData() {
       haptic('success');
       const text = document.getElementById('exportText').value;
       navigator.clipboard.writeText(text).then(() => {
-        Telegram.WebApp.showAlert('✅ Таблица скопирована в буфер обмена!\n\nВставьте данные в Excel или Google Таблицы.');
-        closeExportModal();
-      }).catch(() => {
-        const textarea = document.getElementById('exportText');
-        textarea.select();
-        document.execCommand('copy');
         Telegram.WebApp.showAlert('✅ Таблица скопирована!');
-        closeExportModal();
+        closeModals();
       });
     }
 
     function clearData() {
       haptic('warning');
-      Telegram.WebApp.showConfirm('Вы действительно хотите полностью очистить всю историю сессий?', function(confirmed) {
+      Telegram.WebApp.showConfirm('Очистить историю для текущего авто?', function(confirmed) {
         if (confirmed) {
-          localStorage.removeItem('ev_logs');
-          db = [];
+          getCurrentCar().logs = [];
+          saveGarage();
           render();
           haptic('success');
-          Telegram.WebApp.showAlert('История очищена.');
+          Telegram.WebApp.showAlert('История текущего авто очищена.');
         }
       });
     }
 
     initChart();
+    populateCarSelect();
     render();
   </script>
 </body>
