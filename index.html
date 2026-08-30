@@ -53,12 +53,12 @@
         </svg>
         <div class="absolute flex flex-col items-center">
           <span id="soc-val" class="text-3xl font-black text-slate-800">0%</span>
-          <span class="text-[9px] text-slate-400">Залито в АКБ</span>
+          <span class="text-[9px] text-slate-400">Объем заряда</span>
         </div>
       </div>
 
       <div class="w-full text-center text-xs text-slate-600 border-t border-slate-100 pt-2">
-        <div class="text-[11px] text-slate-400">Последняя зарядка:</div>
+        <div class="text-[11px] text-slate-400">Последняя сессия:</div>
         <div id="last-charge-text" class="font-bold text-blue-600">Нет данных</div>
       </div>
     </div>
@@ -67,7 +67,7 @@
     <div class="card-clean rounded-2xl p-4 flex flex-col justify-between">
       <div class="flex justify-between items-start mb-2">
         <div>
-          <div class="text-xs uppercase font-bold tracking-wider text-slate-700">📊 ИСТОРИЯ ЗАВЕРШЕНИЙ</div>
+          <div class="text-xs uppercase font-bold tracking-wider text-slate-700">📊 ИСТОРИЯ СЕССИЙ</div>
           <div id="stat-summary" class="text-[11px] text-slate-500">0 кВт⋅ч / 0 км / 0 сессий</div>
         </div>
       </div>
@@ -82,12 +82,12 @@
   <div class="card-clean rounded-2xl p-3.5 mb-3 border-blue-100 bg-gradient-to-r from-blue-50/50 to-white">
     <div class="flex items-center justify-between text-xs font-bold text-blue-700 mb-1.5">
       <div class="flex items-center gap-1.5">
-        <span>⚡</span> Средняя эффективность
+        <span>⚡</span> Средняя энергоэффективность
       </div>
       <span class="text-[10px] bg-white text-blue-700 border border-blue-200 px-2 py-0.5 rounded shadow-sm">Geely EX5</span>
     </div>
     <div class="text-xs text-slate-600">
-      Расход: <span id="avg-cons" class="text-blue-700 font-bold">0.0 кВт⋅ч/100км</span>
+      Средний расход: <span id="avg-cons" class="text-blue-700 font-bold">0.0 кВт⋅ч/100км</span>
     </div>
     <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden mt-2">
       <div id="progress-bar" class="accent-blue h-full w-[0%] transition-all duration-500"></div>
@@ -96,14 +96,14 @@
 
   <!-- Форма записи -->
   <div class="card-clean rounded-2xl p-4 mb-3 space-y-2.5">
-    <div class="text-xs font-bold uppercase tracking-wider text-blue-600">➕ Новая запись в журнал</div>
+    <div class="text-xs font-bold uppercase tracking-wider text-blue-600">➕ Новая зарядная сессия</div>
     <div class="grid grid-cols-2 gap-2">
-      <input id="odo" type="number" onfocus="haptic('light')" placeholder="Пробег (км)" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition">
-      <input id="kwh" type="number" step="any" onfocus="haptic('light')" placeholder="Залито (кВт⋅ч)" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition">
+      <input id="odo" type="number" onfocus="haptic('light')" placeholder="Текущий одометр (км)" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition">
+      <input id="kwh" type="number" step="any" onfocus="haptic('light')" placeholder="Заряжено (кВт⋅ч)" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition">
     </div>
-    <input id="price" type="number" step="any" onfocus="haptic('light')" placeholder="Стоимость (₽)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition">
+    <input id="price" type="number" step="any" onfocus="haptic('light')" placeholder="Стоимость зарядки (₽)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition">
     <button onclick="saveData()" class="w-full accent-blue text-white hover:opacity-95 active:scale-[0.98] font-bold py-3 rounded-xl text-xs uppercase tracking-wider transition shadow-md shadow-blue-500/20">
-      💾 Записать данные
+      💾 Сохранить сессию
     </button>
   </div>
 
@@ -112,7 +112,7 @@
     <button onclick="haptic('medium'); location.reload();" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-slate-600">
       🔄 <span>Обновить</span>
     </button>
-    <button onclick="exportToCSV()" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-blue-600">
+    <button onclick="exportToExcel()" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-blue-600">
       📊 <span>Экспорт</span>
     </button>
     <button onclick="showReport()" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-slate-600">
@@ -216,7 +216,7 @@
       const price = document.getElementById('price').value || 0;
       if (!odo || !kwh) {
         haptic('warning');
-        Telegram.WebApp.showAlert('Заполните пробег и кВт⋅ч!');
+        Telegram.WebApp.showAlert('Заполните одометр и объем заряда в кВт⋅ч!');
         return;
       }
       db.push({ odo: parseFloat(odo), kwh: parseFloat(kwh), price: parseFloat(price), date: new Date().toISOString() });
@@ -232,43 +232,28 @@
       haptic('light');
       let totalCost = db.reduce((acc, i) => acc + parseFloat(i.price || 0), 0);
       let totalKwh = db.reduce((acc, i) => acc + parseFloat(i.kwh || 0), 0);
-      Telegram.WebApp.showAlert(`Всего сессий: ${db.length}\nЗалито энергии: ${totalKwh.toFixed(1)} кВт⋅ч\nПотрачено: ${Math.round(totalCost)} ₽`);
+      Telegram.WebApp.showAlert(`Всего сессий: ${db.length}\nПринято энергии: ${totalKwh.toFixed(1)} кВт⋅ч\nЗатраты: ${Math.round(totalCost)} ₽`);
     }
 
-    function exportToCSV() {
+    function exportToExcel() {
       haptic('medium');
       if (db.length === 0) {
         Telegram.WebApp.showAlert('История пуста. Добавьте записи перед экспортом.');
         return;
       }
-      let csvContent = "\uFEFFДата,Время,Пробег (км),Залито (кВт⋅ч),Стоимость (₽)\n";
-      db.forEach(item => {
-        const d = new Date(item.date);
-        const dateStr = d.toLocaleDateString('ru-RU');
-        const timeStr = d.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'});
-        csvContent += `"${dateStr}","${timeStr}",${item.odo},${item.kwh},${item.price}\n`;
-      });
-
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.setAttribute("href", url);
-      link.setAttribute("download", `ev_garage_export_${new Date().toISOString().slice(0,10)}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      haptic('success');
+      // Отправка данных боту для генерации Excel
+      Telegram.WebApp.sendData(JSON.stringify({ action: "export_excel", logs: db }));
     }
 
     function clearData() {
       haptic('warning');
-      Telegram.WebApp.showConfirm('Вы действительно хотите полностью очистить всю историю?', function(confirmed) {
+      Telegram.WebApp.showConfirm('Вы действительно хотите полностью очистить всю историю сессий?', function(confirmed) {
         if (confirmed) {
           localStorage.removeItem('ev_logs');
           db = [];
           render();
           haptic('success');
-          Telegram.WebApp.showAlert('История сброшена.');
+          Telegram.WebApp.showAlert('История очищена.');
         }
       });
     }
