@@ -21,6 +21,11 @@
     .accent-blue {
       background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
     }
+    .filter-btn-active {
+      background-color: #2563eb;
+      color: #ffffff;
+      border-color: #2563eb;
+    }
   </style>
 </head>
 <body class="p-3.5 select-none min-h-screen pb-12">
@@ -34,7 +39,6 @@
         <select id="carSelect" onchange="selectCar(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-bold text-blue-700 outline-none focus:border-blue-500">
         </select>
       </div>
-      <!-- Кнопка меняется динамически: Добавить авто / Редактировать авто -->
       <div id="carActionContainer" class="pt-4">
         <button id="addCarBtn" onclick="handleCarAction()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl text-xs font-bold active:scale-95 transition shadow-sm whitespace-nowrap">
           ➕ Добавить авто
@@ -51,13 +55,26 @@
     </div>
   </div>
 
+  <!-- Фильтр по периодам и месяцам -->
+  <div class="card-clean rounded-2xl p-2.5 mb-3 flex items-center gap-1.5 overflow-x-auto">
+    <button id="btn-filter-all" onclick="setFilter('all')" class="filter-btn filter-btn-active px-3 py-1.5 rounded-xl text-[11px] font-bold border border-slate-200 transition whitespace-nowrap">
+      Всё время
+    </button>
+    <button id="btn-filter-current" onclick="setFilter('current')" class="filter-btn bg-slate-50 text-slate-600 px-3 py-1.5 rounded-xl text-[11px] font-bold border border-slate-200 transition whitespace-nowrap">
+      Этот месяц
+    </button>
+    <select id="monthSelect" onchange="setFilter(this.value)" class="bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-[11px] font-bold text-slate-700 outline-none">
+      <option value="" disabled selected>Выбрать месяц...</option>
+    </select>
+  </div>
+
   <!-- Главные виджеты -->
   <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
     
     <!-- Круговой индикатор -->
     <div class="card-clean rounded-2xl p-4 flex flex-col items-center justify-between relative">
       <div class="text-xs uppercase font-bold tracking-wider text-blue-600 flex items-center gap-1">
-        📈 ОБЩАЯ СТАТИСТИКА
+        📈 СТАТИСТИКА ЗА ПЕРИОД
       </div>
       
       <div class="relative w-36 h-36 my-2 flex items-center justify-center">
@@ -74,7 +91,7 @@
       </div>
 
       <div class="w-full text-center text-xs text-slate-600 border-t border-slate-100 pt-2">
-        <div class="text-[11px] text-slate-400">Последняя сессия:</div>
+        <div class="text-[11px] text-slate-400">Последняя сессия периода:</div>
         <div id="last-charge-text" class="font-bold text-blue-600">Нет данных</div>
       </div>
     </div>
@@ -98,12 +115,13 @@
   <div class="card-clean rounded-2xl p-3.5 mb-3 border-blue-100 bg-gradient-to-r from-blue-50/50 to-white">
     <div class="flex items-center justify-between text-xs font-bold text-blue-700 mb-1.5">
       <div class="flex items-center gap-1.5">
-        <span>⚡</span> Энергоэффективность
+        <span>⚡</span> Энергоэффективность за период
       </div>
       <span id="car-badge-name" class="text-[10px] bg-white text-blue-700 border border-blue-200 px-2 py-0.5 rounded shadow-sm">Авто</span>
     </div>
-    <div class="text-xs text-slate-600">
-      Средний расход: <span id="avg-cons" class="text-blue-700 font-bold">0.0 кВт⋅ч/100км</span>
+    <div class="flex justify-between text-xs text-slate-600">
+      <span>Расход: <b id="avg-cons" class="text-blue-700">0.0 кВт⋅ч/100км</b></span>
+      <span>Затраты: <b id="period-cost" class="text-emerald-600">0 ₽</b></span>
     </div>
     <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden mt-2">
       <div id="progress-bar" class="accent-blue h-full w-[0%] transition-all duration-500"></div>
@@ -117,7 +135,7 @@
     </div>
   </div>
 
-  <!-- Форма записи (видна только владельцу выбранного авто) -->
+  <!-- Форма записи -->
   <div id="chargeFormCard" class="card-clean rounded-2xl p-4 mb-3 space-y-2.5">
     <div class="text-xs font-bold uppercase tracking-wider text-blue-600">➕ Новая зарядная сессия</div>
     <div class="grid grid-cols-2 gap-2">
@@ -146,7 +164,7 @@
     </button>
   </div>
 
-  <!-- Модалка добавления/редактирования авто -->
+  <!-- Модалка авто -->
   <div id="carModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
     <div class="bg-white w-full max-w-sm rounded-2xl p-4 shadow-2xl border border-slate-100">
       <h3 id="modalTitle" class="text-sm font-bold text-blue-600 mb-2">➕ Добавить свой автомобиль</h3>
@@ -178,17 +196,15 @@
   </div>
 
   <script>
-    // Текущий пользователь Telegram
     const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user || { id: 0, first_name: 'Пользователь' };
     const currentUserId = tgUser.id || 'owner_main';
     const currentUserName = tgUser.first_name || 'Водитель';
 
-    // База данных сообщества
     let allCars = JSON.parse(localStorage.getItem('ev_global_cars') || '[]');
     let selectedCarId = localStorage.getItem('ev_active_car_id') || '';
+    let currentFilter = 'all'; // 'all', 'current', или 'YYYY-MM'
     let chartInstance = null;
 
-    // Первоначальное авто по умолчанию
     if (allCars.length === 0) {
       allCars.push({
         id: 'car_' + currentUserId,
@@ -202,18 +218,10 @@
       saveDataStore();
     }
 
-    if (!selectedCarId && allCars.length > 0) {
-      selectedCarId = allCars[0].id;
-    }
+    if (!selectedCarId && allCars.length > 0) selectedCarId = allCars[0].id;
 
-    function getUserCar() {
-      return allCars.find(c => String(c.ownerId) === String(currentUserId));
-    }
-
-    function getSelectedCar() {
-      return allCars.find(c => c.id === selectedCarId) || allCars[0];
-    }
-
+    function getUserCar() { return allCars.find(c => String(c.ownerId) === String(currentUserId)); }
+    function getSelectedCar() { return allCars.find(c => c.id === selectedCarId) || allCars[0]; }
     function saveDataStore() {
       localStorage.setItem('ev_global_cars', JSON.stringify(allCars));
       localStorage.setItem('ev_active_car_id', selectedCarId);
@@ -226,6 +234,57 @@
         if (type === 'success') Telegram.WebApp.HapticFeedback.notificationOccurred('success');
         if (type === 'warning') Telegram.WebApp.HapticFeedback.notificationOccurred('warning');
       } catch(e){}
+    }
+
+    function populateMonthSelect() {
+      const car = getSelectedCar();
+      const logs = car.logs || [];
+      const select = document.getElementById('monthSelect');
+      select.innerHTML = '<option value="" disabled>Другой месяц...</option>';
+
+      const months = new Set();
+      logs.forEach(i => {
+        if (i.date) {
+          const key = i.date.slice(0, 7); // 'YYYY-MM'
+          months.add(key);
+        }
+      });
+
+      const sortedMonths = Array.from(months).sort().reverse();
+      sortedMonths.forEach(m => {
+        const [year, month] = m.split('-');
+        const dateObj = new Date(year, month - 1);
+        const name = dateObj.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+        const opt = document.createElement('option');
+        opt.value = m;
+        opt.innerText = name.charAt(0).toUpperCase() + name.slice(1);
+        if (currentFilter === m) opt.selected = true;
+        select.appendChild(opt);
+      });
+    }
+
+    function setFilter(filterType) {
+      haptic('light');
+      currentFilter = filterType;
+      
+      // Стили кнопок
+      document.getElementById('btn-filter-all').className = `filter-btn px-3 py-1.5 rounded-xl text-[11px] font-bold border transition whitespace-nowrap ${filterType === 'all' ? 'filter-btn-active' : 'bg-slate-50 text-slate-600 border-slate-200'}`;
+      document.getElementById('btn-filter-current').className = `filter-btn px-3 py-1.5 rounded-xl text-[11px] font-bold border transition whitespace-nowrap ${filterType === 'current' ? 'filter-btn-active' : 'bg-slate-50 text-slate-600 border-slate-200'}`;
+      
+      render();
+    }
+
+    function getFilteredLogs() {
+      const car = getSelectedCar();
+      const logs = car.logs || [];
+      const now = new Date();
+      const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+      if (currentFilter === 'all') return logs;
+      if (currentFilter === 'current') {
+        return logs.filter(i => i.date && i.date.startsWith(currentMonthKey));
+      }
+      return logs.filter(i => i.date && i.date.startsWith(currentFilter));
     }
 
     function updateCatalogUI() {
@@ -275,6 +334,8 @@
         resetBtn.classList.add('hidden');
         notice.classList.remove('hidden');
       }
+
+      populateMonthSelect();
     }
 
     function selectCar(id) {
@@ -320,12 +381,10 @@
 
       let myCar = getUserCar();
       if (myCar) {
-        // Редактирование существующего автомобиля
         myCar.name = name;
         myCar.capacity = cap;
         Telegram.WebApp.showAlert(`✅ Данные авто "${name}" обновлены!`);
       } else {
-        // Создание единственного разрешенного авто
         myCar = {
           id: 'car_' + currentUserId,
           name: name,
@@ -371,7 +430,7 @@
 
     function render() {
       const car = getSelectedCar();
-      const logs = car.logs || [];
+      const logs = getFilteredLogs();
       let totalKwh = 0;
       let totalCost = 0;
       let weekdayKwh = [0, 0, 0, 0, 0, 0, 0];
@@ -402,6 +461,7 @@
         document.getElementById('avg-cons').innerText = `0.0 кВт⋅ч/100км`;
       }
 
+      document.getElementById('period-cost').innerText = `${Math.round(totalCost)} ₽`;
       document.getElementById('stat-summary').innerText = `${totalKwh.toFixed(1)} кВт⋅ч / ${dist} км / ${logs.length} сессий`;
 
       if (logs.length > 0) {
@@ -455,28 +515,29 @@
       document.getElementById('kwh').value = '';
       document.getElementById('rate').value = '';
       haptic('success');
+      populateMonthSelect();
       render();
     }
 
     function showReport() {
       haptic('light');
       const car = getSelectedCar();
-      const logs = car.logs || [];
+      const logs = getFilteredLogs();
       let totalCost = logs.reduce((acc, i) => acc + parseFloat(i.totalPrice || i.price || 0), 0);
       let totalKwh = logs.reduce((acc, i) => acc + parseFloat(i.kwh || 0), 0);
-      Telegram.WebApp.showAlert(`Авто: ${car.name}\nВладелец: ${car.ownerName || 'Владелец'}\nСессий: ${logs.length}\nЭнергия: ${totalKwh.toFixed(1)} кВт⋅ч\nЗатраты: ${Math.round(totalCost)} ₽`);
+      Telegram.WebApp.showAlert(`Авто: ${car.name}\nПериод: ${currentFilter === 'all' ? 'Всё время' : currentFilter}\nСессий: ${logs.length}\nЭнергия: ${totalKwh.toFixed(1)} кВт⋅ч\nЗатраты: ${Math.round(totalCost)} ₽`);
     }
 
     function openExportModal() {
       haptic('medium');
       const car = getSelectedCar();
-      const logs = car.logs || [];
+      const logs = getFilteredLogs();
       if (logs.length === 0) {
-        Telegram.WebApp.showAlert('История пуста для этого авто.');
+        Telegram.WebApp.showAlert('История за выбранный период пуста.');
         return;
       }
 
-      let tableText = `Отчет: ${car.name} (Владелец: ${car.ownerName || 'Пользователь'})\nДата\tВремя\tТекущий пробег (км)\tЗаряжено (кВт⋅ч)\tТариф (₽/кВт⋅ч)\tИтого (₽)\n`;
+      let tableText = `Отчет (${currentFilter}): ${car.name} (Владелец: ${car.ownerName || 'Пользователь'})\nДата\tВремя\tТекущий пробег (км)\tЗаряжено (кВт⋅ч)\tТариф (₽/кВт⋅ч)\tИтого (₽)\n`;
       logs.forEach(item => {
         const d = new Date(item.date);
         const dateStr = d.toLocaleDateString('ru-RU');
@@ -514,6 +575,7 @@
         if (confirmed) {
           car.logs = [];
           saveDataStore();
+          populateMonthSelect();
           render();
           haptic('success');
           Telegram.WebApp.showAlert('Журнал очищен.');
