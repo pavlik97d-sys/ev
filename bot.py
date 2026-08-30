@@ -7,14 +7,14 @@ import telebot
 from telebot import types
 
 TOKEN = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU'
-WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=11'
+WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=12'
 
-# Фоновый веб-сервер для 24/7 работы на Render
+# Фоновый веб-сервер для удержания на Render
 class SimpleHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"EV Garage Bot is Online 24/7")
+        self.wfile.write(b"OK")
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -29,61 +29,48 @@ threading.Thread(target=run_web_server, daemon=True).start()
 
 bot = telebot.TeleBot(TOKEN)
 
-# Настройка постоянной кнопки WebApp в нижнем левом углу чата (Menu Button)
-try:
-    bot.set_chat_menu_button(
-        menu_button=types.MenuButtonWebApp(
-            type="web_app",
-            text="⚡ EV Garage",
-            web_app=types.WebAppInfo(url=WEB_APP_URL)
-        )
-    )
-except Exception as err:
-    print("Menu button error:", err)
-
-# Приветственное сообщение
-WELCOME_TEXT = """🚗 **Добро пожаловать в бортовой журнал электромобилей!**
-
-Здесь вы можете:
-• ⚡ Вносить и отслеживать историю своих зарядок
-• 📊 Считать средний расход (кВт⋅ч/100 км) и затраты в рублях
-• 📈 Изучать открытую статистику других электромобилей сообщества
-• 📑 Выгружать готовую аналитику в Excel
-
-_Нажмите кнопку ниже или используйте постоянную кнопку в левом нижнем углу меню:_"""
-
 @bot.message_handler(func=lambda m: True)
-def handle_message(message):
+def handle_all(message):
     try:
-        # Создаем стильную Inline-кнопку
-        inline_kb = types.InlineKeyboardMarkup()
-        btn = types.InlineKeyboardButton(
-            text='⚡ Открыть EV Garage',
-            web_app=types.WebAppInfo(url=WEB_APP_URL)
-        )
-        inline_kb.add(btn)
+        # Убираем серую клавиатуру
+        remove_markup = types.ReplyKeyboardRemove()
+        
+        # Кнопка запуска WebApp
+        kb = types.InlineKeyboardMarkup()
+        btn = types.InlineKeyboardButton(text="⚡ Открыть EV Garage", web_app=types.WebAppInfo(url=WEB_APP_URL))
+        kb.add(btn)
 
-        # Отправляем карточку приветствия
+        text = (
+            "🚗 **Бортовой журнал электромобилей**\n\n"
+            "• Учет личных зарядок и затрат\n"
+            "• Просмотр статистики любого авто в каталоге\n"
+            "• Экспорт данных в Excel\n\n"
+            "Нажмите кнопку ниже для перехода:"
+        )
+
         bot.send_message(
             message.chat.id,
-            WELCOME_TEXT,
+            text,
             parse_mode="Markdown",
-            reply_markup=inline_kb
+            reply_markup=kb
         )
-
-        # Бесследно очищаем старую зависшую серую клавиатуру
-        bot.send_message(
-            message.chat.id,
-            "⠀",
-            reply_markup=types.ReplyKeyboardRemove()
-        )
+        
+        # Удаление старых кнопок
+        bot.send_message(message.chat.id, "Клавиатура очищена.", reply_markup=remove_markup)
     except Exception as e:
-        print("Message handle error:", e)
+        print("Error:", e)
 
 if __name__ == '__main__':
-    print('>>> БОТ ОБНОВЛЕН И ЗАПУЩЕН С НОВЫМ ИНТЕРФЕЙСОМ <<<')
+    print("BOT STARTED")
+    # Снимаем зависшие вебхуки Telegram перед запуском
+    try:
+        bot.remove_webhook()
+    except Exception:
+        pass
+    
     while True:
         try:
-            bot.infinity_polling(skip_pending=True, timeout=20)
-        except Exception as err:
+            bot.infinity_polling(skip_pending=True, timeout=15)
+        except Exception as e:
+            print("Restarting polling due to:", e)
             time.sleep(3)
