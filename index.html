@@ -1,71 +1,330 @@
-import os
-import time
-import threading
-import http.server
-import socketserver
-import urllib.request
-import telebot
-from telebot import types
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>EV Статистика</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      background: #f0f4f8;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: #1e293b;
+    }
+    .card-clean {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 4px 20px -2px rgba(37, 99, 235, 0.06);
+    }
+    .accent-blue {
+      background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+    }
+  </style>
+</head>
+<body class="p-3.5 select-none min-h-screen pb-10">
+  <script>window.Telegram.WebApp.expand();</script>
 
-TOKEN = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU'
-WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=4'
+  <!-- Инфо-плашка -->
+  <div class="card-clean rounded-2xl p-3 mb-3 flex items-center justify-between text-xs text-slate-500">
+    <div>
+      <span class="font-bold text-blue-600">📊 Сводка обновлена:</span> <span id="sync-time" class="text-slate-700">--:--</span>
+      <div class="text-[11px] text-slate-400">⚡ Geely EX5 EM-i • 18.7 кВт⋅ч</div>
+    </div>
+    <span class="bg-blue-50 text-blue-600 border border-blue-200 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider">ONLINE</span>
+  </div>
 
-# Веб-сервер для бесплатного тарифа Render
-class SimpleHandler(http.server.SimpleHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot is alive and running 24/7")
+  <!-- Главные виджеты -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+    
+    <!-- Левый виджет: Круговой индикатор -->
+    <div class="card-clean rounded-2xl p-4 flex flex-col items-center justify-between relative">
+      <div class="text-xs uppercase font-bold tracking-wider text-blue-600 flex items-center gap-1">
+        📈 ОБЩАЯ СТАТИСТИКА
+      </div>
+      
+      <div class="relative w-36 h-36 my-2 flex items-center justify-center">
+        <svg class="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+          <path class="text-slate-100" stroke-width="3.5" stroke="currentColor" fill="none"
+            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+          <path id="circle-bar" class="text-blue-600 transition-all duration-700" stroke-width="3.5" stroke-dasharray="0, 100" stroke-linecap="round" stroke="currentColor" fill="none"
+            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+        </svg>
+        <div class="absolute flex flex-col items-center">
+          <span id="soc-val" class="text-3xl font-black text-slate-800">0%</span>
+          <span class="text-[9px] text-slate-400">Объем заряда</span>
+        </div>
+      </div>
 
-def run_web_server():
-    port = int(os.environ.get("PORT", 8080))
-    socketserver.TCPServer.allow_reuse_address = True
-    try:
-        with socketserver.TCPServer(("", port), SimpleHandler) as httpd:
-            httpd.serve_forever()
-    except Exception as e:
-        print("Server error:", e)
+      <div class="w-full text-center text-xs text-slate-600 border-t border-slate-100 pt-2">
+        <div class="text-[11px] text-slate-400">Последняя сессия:</div>
+        <div id="last-charge-text" class="font-bold text-blue-600">Нет данных</div>
+      </div>
+    </div>
 
-threading.Thread(target=run_web_server, daemon=True).start()
+    <!-- Правый виджет: График по дням недели -->
+    <div class="card-clean rounded-2xl p-4 flex flex-col justify-between">
+      <div class="flex justify-between items-start mb-2">
+        <div>
+          <div class="text-xs uppercase font-bold tracking-wider text-slate-700">📊 ИСТОРИЯ СЕССИЙ</div>
+          <div id="stat-summary" class="text-[11px] text-slate-500">0 кВт⋅ч / 0 км / 0 сессий</div>
+        </div>
+      </div>
+      
+      <div class="h-32 w-full">
+        <canvas id="barChart"></canvas>
+      </div>
+    </div>
+  </div>
 
-bot = telebot.TeleBot(TOKEN)
+  <!-- Статус авто -->
+  <div class="card-clean rounded-2xl p-3.5 mb-3 border-blue-100 bg-gradient-to-r from-blue-50/50 to-white">
+    <div class="flex items-center justify-between text-xs font-bold text-blue-700 mb-1.5">
+      <div class="flex items-center gap-1.5">
+        <span>⚡</span> Средняя энергоэффективность
+      </div>
+      <span class="text-[10px] bg-white text-blue-700 border border-blue-200 px-2 py-0.5 rounded shadow-sm">Geely EX5</span>
+    </div>
+    <div class="text-xs text-slate-600">
+      Средний расход: <span id="avg-cons" class="text-blue-700 font-bold">0.0 кВт⋅ч/100км</span>
+    </div>
+    <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden mt-2">
+      <div id="progress-bar" class="accent-blue h-full w-[0%] transition-all duration-500"></div>
+    </div>
+  </div>
 
-# Обработка любых входящих текстовых сообщений и нажатий на старые кнопки
-@bot.message_handler(func=lambda m: True)
-def handle_all_messages(message):
-    try:
-        # Убираем старую серую клавиатуру внизу чата
-        remove_kb = types.ReplyKeyboardRemove()
+  <!-- Форма записи -->
+  <div class="card-clean rounded-2xl p-4 mb-3 space-y-2.5">
+    <div class="text-xs font-bold uppercase tracking-wider text-blue-600">➕ Новая зарядная сессия</div>
+    <div class="grid grid-cols-2 gap-2">
+      <input id="odo" type="number" onfocus="haptic('light')" placeholder="Текущий пробег (км)" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition">
+      <input id="kwh" type="number" step="any" onfocus="haptic('light')" placeholder="Заряжено (кВт⋅ч)" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition">
+    </div>
+    <input id="rate" type="number" step="any" onfocus="haptic('light')" placeholder="Тариф за 1 кВт⋅ч (₽)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition">
+    <button onclick="saveData()" class="w-full accent-blue text-white hover:opacity-95 active:scale-[0.98] font-bold py-3 rounded-xl text-xs uppercase tracking-wider transition shadow-md shadow-blue-500/20">
+      💾 Сохранить сессию
+    </button>
+  </div>
+
+  <!-- Нижняя панель действий -->
+  <div class="grid grid-cols-4 gap-2 text-[11px] font-medium text-center">
+    <button onclick="haptic('medium'); location.reload();" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-slate-600">
+      🔄 <span>Обновить</span>
+    </button>
+    <button onclick="openExportModal()" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-blue-600">
+      📊 <span>Экспорт</span>
+    </button>
+    <button onclick="showReport()" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-slate-600">
+      📈 <span>Отчеты</span>
+    </button>
+    <button onclick="clearData()" class="card-clean p-2.5 rounded-xl hover:bg-rose-50 active:scale-95 transition flex flex-col items-center gap-1 text-rose-500">
+      ⚙️ <span>Сброс</span>
+    </button>
+  </div>
+
+  <!-- Модальное окно экспорта -->
+  <div id="exportModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-sm rounded-2xl p-4 shadow-2xl border border-slate-100 flex flex-col">
+      <div class="flex justify-between items-center mb-2">
+        <h3 class="text-sm font-bold text-blue-600">📊 Экспорт данных (Excel)</h3>
+        <button onclick="closeExportModal()" class="text-slate-400 hover:text-slate-600 text-lg font-bold">✕</button>
+      </div>
+      <p class="text-[11px] text-slate-500 mb-2">Нажмите кнопку ниже, чтобы скопировать готовую таблицу со всеми расчетами:</p>
+      <textarea id="exportText" readonly class="w-full h-36 bg-slate-50 border border-slate-200 rounded-xl p-2 text-[10px] font-mono text-slate-700 outline-none mb-3"></textarea>
+      <div class="flex gap-2">
+        <button onclick="copyExportData()" class="flex-1 accent-blue text-white py-2.5 rounded-xl text-xs font-bold active:scale-95 transition">
+          📋 Скопировать всё
+        </button>
+        <button onclick="closeExportModal()" class="px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 py-2.5 rounded-xl text-xs font-bold">
+          Закрыть
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const BATTERY_CAP = 18.7;
+    let db = JSON.parse(localStorage.getItem('ev_logs') || '[]');
+    let chartInstance = null;
+
+    function haptic(type) {
+      try {
+        if (type === 'light') Telegram.WebApp.HapticFeedback.impactOccurred('light');
+        if (type === 'medium') Telegram.WebApp.HapticFeedback.impactOccurred('medium');
+        if (type === 'success') Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+        if (type === 'warning') Telegram.WebApp.HapticFeedback.notificationOccurred('warning');
+      } catch(e){}
+    }
+
+    function initChart() {
+      const ctx = document.getElementById('barChart').getContext('2d');
+      chartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'],
+          datasets: [{
+            data: [0, 0, 0, 0, 0, 0, 0],
+            backgroundColor: '#2563eb',
+            borderRadius: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 9 } } },
+            y: { grid: { color: '#f1f5f9' }, ticks: { color: '#64748b', font: { size: 9 } }, beginAtZero: true }
+          }
+        }
+      });
+    }
+
+    function render() {
+      let totalKwh = 0;
+      let totalCost = 0;
+      let weekdayKwh = [0, 0, 0, 0, 0, 0, 0];
+
+      db.forEach(i => {
+        const kwh = parseFloat(i.kwh || 0);
+        totalKwh += kwh;
+        totalCost += parseFloat(i.totalPrice || i.price || 0);
         
-        # Создаем кнопку WebApp
-        inline_kb = types.InlineKeyboardMarkup()
-        btn = types.InlineKeyboardButton(
-            text='⚡ Открыть EV Garage',
-            web_app=types.WebAppInfo(url=WEB_APP_URL)
-        )
-        inline_kb.add(btn)
+        if (i.date) {
+          const d = new Date(i.date);
+          const dayIdx = (d.getDay() + 6) % 7;
+          weekdayKwh[dayIdx] += kwh;
+        }
+      });
 
-        bot.send_message(
-            message.chat.id,
-            "⚡ **Бортовой журнал Geely EX5 готов к работе!**\n\nНажмите кнопку ниже для перехода в интерфейс:",
-            parse_mode="Markdown",
-            reply_markup=inline_kb
-        )
-        
-        # Дополнительно отправляем невидимый сигнал на удаление нижней клавиатуры
-        bot.send_message(
-            message.chat.id,
-            "Клавиатура обновлена.",
-            reply_markup=remove_kb
-        )
-    except Exception as e:
-        print("Error sending message:", e)
+      if (chartInstance) {
+        chartInstance.data.datasets[0].data = weekdayKwh;
+        chartInstance.update();
+      }
 
-if __name__ == '__main__':
-    print('>>> БОТ ПЕРЕЗАПУЩЕН И ГОТОВ К РАБОТЕ <<<')
-    while True:
-        try:
-            bot.infinity_polling(skip_pending=True, timeout=20)
-        except Exception as err:
-            print("Polling restart:", err)
-            time.sleep(3)
+      let dist = 0;
+      if (db.length >= 2) {
+        dist = Math.max(...db.map(i => i.odo)) - Math.min(...db.map(i => i.odo));
+        const avg = dist > 0 ? ((totalKwh / dist) * 100).toFixed(1) : '0.0';
+        document.getElementById('avg-cons').innerText = `${avg} кВт⋅ч/100км`;
+      } else {
+        document.getElementById('avg-cons').innerText = `0.0 кВт⋅ч/100км`;
+      }
+
+      document.getElementById('stat-summary').innerText = `${totalKwh.toFixed(1)} кВт⋅ч / ${dist} км / ${db.length} сессий`;
+      document.getElementById('sync-time').innerText = new Date().toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'});
+
+      if (db.length > 0) {
+        const last = db[db.length - 1];
+        const percent = Math.min(100, Math.round((last.kwh / BATTERY_CAP) * 100));
+        const cost = last.totalPrice ? Math.round(last.totalPrice) : Math.round(last.price || 0);
+        document.getElementById('soc-val').innerText = `${percent}%`;
+        document.getElementById('circle-bar').setAttribute('stroke-dasharray', `${percent}, 100`);
+        document.getElementById('last-charge-text').innerText = `🔋 +${last.kwh} кВт⋅ч (${cost} ₽)`;
+        document.getElementById('progress-bar').style.width = `${percent}%`;
+      } else {
+        document.getElementById('soc-val').innerText = `0%`;
+        document.getElementById('circle-bar').setAttribute('stroke-dasharray', `0, 100`);
+        document.getElementById('last-charge-text').innerText = `Нет данных`;
+        document.getElementById('progress-bar').style.width = `0%`;
+      }
+    }
+
+    function saveData() {
+      const odo = document.getElementById('odo').value;
+      const kwh = document.getElementById('kwh').value;
+      const rate = document.getElementById('rate').value || 0;
+
+      if (!odo || !kwh) {
+        haptic('warning');
+        Telegram.WebApp.showAlert('Заполните пробег и количество кВт⋅ч!');
+        return;
+      }
+
+      const kwhVal = parseFloat(kwh);
+      const rateVal = parseFloat(rate);
+      const totalPrice = parseFloat((kwhVal * rateVal).toFixed(2));
+
+      db.push({
+        odo: parseFloat(odo),
+        kwh: kwhVal,
+        rate: rateVal,
+        totalPrice: totalPrice,
+        price: totalPrice,
+        date: new Date().toISOString()
+      });
+
+      localStorage.setItem('ev_logs', JSON.stringify(db));
+      document.getElementById('odo').value = '';
+      document.getElementById('kwh').value = '';
+      document.getElementById('rate').value = '';
+      haptic('success');
+      render();
+    }
+
+    function showReport() {
+      haptic('light');
+      let totalCost = db.reduce((acc, i) => acc + parseFloat(i.totalPrice || i.price || 0), 0);
+      let totalKwh = db.reduce((acc, i) => acc + parseFloat(i.kwh || 0), 0);
+      Telegram.WebApp.showAlert(`Всего сессий: ${db.length}\nПринято энергии: ${totalKwh.toFixed(1)} кВт⋅ч\nОбщие затраты: ${Math.round(totalCost)} ₽`);
+    }
+
+    function openExportModal() {
+      haptic('medium');
+      if (!db || db.length === 0) {
+        Telegram.WebApp.showAlert('История пуста. Сначала сохраните хотя бы одну сессию.');
+        return;
+      }
+
+      let tableText = "Дата\tВремя\tТекущий пробег (км)\tЗаряжено (кВт⋅ч)\tТариф (₽/кВт⋅ч)\tИтого (₽)\n";
+      db.forEach(item => {
+        const d = new Date(item.date);
+        const dateStr = d.toLocaleDateString('ru-RU');
+        const timeStr = d.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'});
+        const rateStr = item.rate !== undefined ? item.rate : '-';
+        const total = item.totalPrice !== undefined ? item.totalPrice : (item.price || 0);
+        tableText += `${dateStr}\t${timeStr}\t${item.odo}\t${item.kwh}\t${rateStr}\t${total}\n`;
+      });
+
+      document.getElementById('exportText').value = tableText;
+      document.getElementById('exportModal').classList.remove('hidden');
+    }
+
+    function closeExportModal() {
+      document.getElementById('exportModal').classList.add('hidden');
+    }
+
+    function copyExportData() {
+      haptic('success');
+      const text = document.getElementById('exportText').value;
+      navigator.clipboard.writeText(text).then(() => {
+        Telegram.WebApp.showAlert('✅ Таблица скопирована в буфер обмена!\n\nВставьте данные в Excel или Google Таблицы.');
+        closeExportModal();
+      }).catch(() => {
+        const textarea = document.getElementById('exportText');
+        textarea.select();
+        document.execCommand('copy');
+        Telegram.WebApp.showAlert('✅ Таблица скопирована!');
+        closeExportModal();
+      });
+    }
+
+    function clearData() {
+      haptic('warning');
+      Telegram.WebApp.showConfirm('Вы действительно хотите полностью очистить всю историю сессий?', function(confirmed) {
+        if (confirmed) {
+          localStorage.removeItem('ev_logs');
+          db = [];
+          render();
+          haptic('success');
+          Telegram.WebApp.showAlert('История очищена.');
+        }
+      });
+    }
+
+    initChart();
+    render();
+  </script>
+</body>
+</html>
