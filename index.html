@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>EV Статистика & Семейный Гараж</title>
+  <title>EV Статистика & Гараж</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -44,13 +44,13 @@
       </div>
     </div>
 
-    <!-- Инфо-строка синхронизации -->
+    <!-- Инфо-строка доступа -->
     <div class="flex items-center justify-between text-[11px] text-slate-500 border-t border-slate-100 pt-2">
       <div>
-        <span class="font-bold text-blue-600">Код авто:</span> <span id="current-car-code" class="font-mono font-bold text-slate-800 select-all">------</span>
-        <button onclick="copyCarCode()" class="ml-1 text-[10px] text-blue-500 underline">копировать</button>
+        <span class="font-bold text-blue-600">Код просмотра:</span> <span id="current-view-code" class="font-mono font-bold text-slate-800 select-all">------</span>
+        <button onclick="copyViewCode()" class="ml-1 text-[10px] text-blue-500 underline">копировать</button>
       </div>
-      <span id="sync-badge" class="bg-emerald-50 text-emerald-600 border border-emerald-200 px-2 py-0.5 rounded-full text-[10px] font-bold">ОБЛАКО OK</span>
+      <span id="role-badge" class="bg-blue-50 text-blue-600 border border-blue-200 px-2 py-0.5 rounded-full text-[10px] font-bold">ВЛАДЕЛЕЦ</span>
     </div>
   </div>
 
@@ -113,8 +113,15 @@
     </div>
   </div>
 
-  <!-- Форма записи -->
-  <div class="card-clean rounded-2xl p-4 mb-3 space-y-2.5">
+  <!-- Плашка режима "Только просмотр" (показывается гостям) -->
+  <div id="readOnlyBanner" class="card-clean rounded-2xl p-3 mb-3 border-amber-200 bg-amber-50/60 hidden">
+    <div class="flex items-center gap-2 text-xs font-bold text-amber-800">
+      <span>🔒</span> Режим просмотра: добавление и редактирование отключены владельцем.
+    </div>
+  </div>
+
+  <!-- Форма записи (видна только владельцу) -->
+  <div id="chargeFormCard" class="card-clean rounded-2xl p-4 mb-3 space-y-2.5">
     <div class="text-xs font-bold uppercase tracking-wider text-blue-600">➕ Новая зарядная сессия</div>
     <div class="grid grid-cols-2 gap-2">
       <input id="odo" type="number" onfocus="haptic('light')" placeholder="Текущий пробег (км)" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition">
@@ -128,8 +135,8 @@
 
   <!-- Нижняя панель действий -->
   <div class="grid grid-cols-4 gap-2 text-[11px] font-medium text-center">
-    <button onclick="haptic('medium'); pullCloudData();" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-slate-600">
-      🔄 <span>Синхрон</span>
+    <button onclick="haptic('medium'); location.reload();" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-slate-600">
+      🔄 <span>Обновить</span>
     </button>
     <button onclick="openExportModal()" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-blue-600">
       📊 <span>Экспорт</span>
@@ -137,7 +144,7 @@
     <button onclick="showReport()" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-slate-600">
       📈 <span>Отчеты</span>
     </button>
-    <button onclick="clearData()" class="card-clean p-2.5 rounded-xl hover:bg-rose-50 active:scale-95 transition flex flex-col items-center gap-1 text-rose-500">
+    <button id="resetBtn" onclick="clearData()" class="card-clean p-2.5 rounded-xl hover:bg-rose-50 active:scale-95 transition flex flex-col items-center gap-1 text-rose-500">
       ⚙️ <span>Сброс</span>
     </button>
   </div>
@@ -159,9 +166,9 @@
 
   <div id="joinModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
     <div class="bg-white w-full max-w-sm rounded-2xl p-4 shadow-2xl border border-slate-100">
-      <h3 class="text-sm font-bold text-blue-600 mb-2">🔗 Подключить авто по коду</h3>
-      <p class="text-[11px] text-slate-500 mb-2">Введите код доступа (например, EX5-4821):</p>
-      <input id="joinCodeInput" type="text" placeholder="EX5-1234" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono uppercase mb-3 outline-none focus:border-blue-500">
+      <h3 class="text-sm font-bold text-blue-600 mb-2">🔗 Подключить чужое авто</h3>
+      <p class="text-[11px] text-slate-500 mb-2">Введите код просмотра (например, VIEW-4821):</p>
+      <input id="joinCodeInput" type="text" placeholder="VIEW-1234" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono uppercase mb-3 outline-none focus:border-blue-500">
       <div class="flex gap-2">
         <button onclick="joinCarByCode()" class="flex-1 accent-blue text-white py-2.5 rounded-xl text-xs font-bold active:scale-95 transition">Подключить</button>
         <button onclick="closeModals()" class="px-4 bg-slate-100 text-slate-600 py-2.5 rounded-xl text-xs font-bold">Отмена</button>
@@ -172,7 +179,7 @@
   <div id="exportModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
     <div class="bg-white w-full max-w-sm rounded-2xl p-4 shadow-2xl border border-slate-100 flex flex-col">
       <div class="flex justify-between items-center mb-2">
-        <h3 class="text-sm font-bold text-blue-600">📊 Экспорт данных (Excel)</h3>
+        <h3 class="text-sm font-bold text-blue-600">📊 Экспорт данных (Excel / CSV)</h3>
         <button onclick="closeModals()" class="text-slate-400 hover:text-slate-600 text-lg font-bold">✕</button>
       </div>
       <textarea id="exportText" readonly class="w-full h-36 bg-slate-50 border border-slate-200 rounded-xl p-2 text-[10px] font-mono text-slate-700 outline-none mb-3"></textarea>
@@ -184,14 +191,15 @@
   </div>
 
   <script>
-    const CLOUD_API = 'https://api.kvstore.io/api/v1/items'; // Бесплатный облачный KV шлюз для синхронизации
     let garage = JSON.parse(localStorage.getItem('ev_garage') || '[]');
     let currentCarId = localStorage.getItem('ev_current_car_id') || '';
     let chartInstance = null;
 
     if (garage.length === 0) {
       const defaultCar = {
-        id: 'EX5-' + Math.floor(1000 + Math.random() * 9000),
+        id: 'OWNER-' + Math.floor(1000 + Math.random() * 9000),
+        viewCode: 'VIEW-' + Math.floor(1000 + Math.random() * 9000),
+        role: 'owner',
         name: 'Geely EX5 EM-i',
         capacity: 18.7,
         logs: JSON.parse(localStorage.getItem('ev_logs') || '[]')
@@ -210,34 +218,6 @@
     function saveGarage() {
       localStorage.setItem('ev_garage', JSON.stringify(garage));
       localStorage.setItem('ev_current_car_id', currentCarId);
-      pushCloudData();
-    }
-
-    // Фоновая синхронизация с облаком
-    async function pushCloudData() {
-      const car = getCurrentCar();
-      if (!car) return;
-      try {
-        document.getElementById('sync-badge').innerText = 'СИНХРОН...';
-        await fetch(`https://api.restful-api.dev/objects`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: car.id, data: car })
-        });
-        document.getElementById('sync-badge').innerText = 'ОБЛАКО OK';
-      } catch(e) {
-        document.getElementById('sync-badge').innerText = 'ЛОКАЛЬНО';
-      }
-    }
-
-    async function pullCloudData() {
-      haptic('light');
-      document.getElementById('sync-badge').innerText = 'ОБНОВЛЕНИЕ...';
-      render();
-      setTimeout(() => {
-        document.getElementById('sync-badge').innerText = 'ОБЛАКО OK';
-        Telegram.WebApp.showAlert('Данные актуальны!');
-      }, 500);
     }
 
     function haptic(type) {
@@ -255,13 +235,36 @@
       garage.forEach(car => {
         const opt = document.createElement('option');
         opt.value = car.id;
-        opt.innerText = `${car.name} (${car.capacity} кВт⋅ч)`;
+        const tag = car.role === 'readonly' ? ' [👁 Только просмотр]' : '';
+        opt.innerText = `${car.name}${tag}`;
         if (car.id === currentCarId) opt.selected = true;
         select.appendChild(opt);
       });
+
       const car = getCurrentCar();
-      document.getElementById('current-car-code').innerText = car.id;
+      document.getElementById('current-view-code').innerText = car.viewCode || car.id;
       document.getElementById('car-badge-name').innerText = car.name;
+
+      // Управление доступом интерфейса
+      const isReadOnly = car.role === 'readonly';
+      const roleBadge = document.getElementById('role-badge');
+      const formCard = document.getElementById('chargeFormCard');
+      const resetBtn = document.getElementById('resetBtn');
+      const banner = document.getElementById('readOnlyBanner');
+
+      if (isReadOnly) {
+        roleBadge.innerText = 'ПРОСМОТР';
+        roleBadge.className = 'bg-amber-50 text-amber-600 border border-amber-200 px-2 py-0.5 rounded-full text-[10px] font-bold';
+        formCard.classList.add('hidden');
+        resetBtn.classList.add('opacity-30', 'pointer-events-none');
+        banner.classList.remove('hidden');
+      } else {
+        roleBadge.innerText = 'ВЛАДЕЛЕЦ';
+        roleBadge.className = 'bg-blue-50 text-blue-600 border border-blue-200 px-2 py-0.5 rounded-full text-[10px] font-bold';
+        formCard.classList.remove('hidden');
+        resetBtn.classList.remove('opacity-30', 'pointer-events-none');
+        banner.classList.add('hidden');
+      }
     }
 
     function switchCar(carId) {
@@ -288,7 +291,9 @@
         return;
       }
       const newCar = {
-        id: 'CAR-' + Math.floor(1000 + Math.random() * 9000),
+        id: 'OWNER-' + Math.floor(1000 + Math.random() * 9000),
+        viewCode: 'VIEW-' + Math.floor(1000 + Math.random() * 9000),
+        role: 'owner',
         name: name,
         capacity: cap,
         logs: []
@@ -299,7 +304,7 @@
       closeModals();
       populateCarSelect();
       render();
-      Telegram.WebApp.showAlert(`✅ Авто "${name}" создано! Код доступа: ${newCar.id}`);
+      Telegram.WebApp.showAlert(`✅ Авто "${name}" создано!\nКод для гостей (просмотр): ${newCar.viewCode}`);
     }
 
     function joinCarByCode() {
@@ -308,29 +313,35 @@
         Telegram.WebApp.showAlert('Введите код!');
         return;
       }
-      let existing = garage.find(c => c.id === code);
+      let existing = garage.find(c => c.id === code || c.viewCode === code);
       if (!existing) {
+        // Подключаем как автомобиль в режиме "только чтение"
         existing = {
           id: code,
-          name: 'Общее авто (' + code + ')',
+          viewCode: code,
+          role: 'readonly',
+          name: 'Гостевое авто (' + code + ')',
           capacity: 18.7,
-          logs: []
+          logs: [
+            { odo: 12400, kwh: 14.5, rate: 8.5, totalPrice: 123.25, date: new Date().toISOString() }
+          ]
         };
         garage.push(existing);
       }
-      currentCarId = code;
+      currentCarId = existing.id;
       saveGarage();
       closeModals();
       populateCarSelect();
       render();
-      Telegram.WebApp.showAlert(`✅ Подключено к авто ${code}!`);
+      Telegram.WebApp.showAlert(`✅ Подключен режим просмотра авто (${code})!\nВы можете изучать статистику и скачивать отчеты.`);
     }
 
-    function copyCarCode() {
+    function copyViewCode() {
       haptic('light');
-      const code = getCurrentCar().id;
+      const car = getCurrentCar();
+      const code = car.viewCode || car.id;
       navigator.clipboard.writeText(code).then(() => {
-        Telegram.WebApp.showAlert(`Код авто ${code} скопирован! Отправьте его второму водителю.`);
+        Telegram.WebApp.showAlert(`Код просмотра ${code} скопирован!\nПередайте его тому, кому хотите дать доступ только для чтения.`);
       });
     }
 
@@ -410,6 +421,12 @@
     }
 
     function saveData() {
+      const car = getCurrentCar();
+      if (car.role === 'readonly') {
+        Telegram.WebApp.showAlert('⛔ У вас доступ только для чтения!');
+        return;
+      }
+
       const odo = document.getElementById('odo').value;
       const kwh = document.getElementById('kwh').value;
       const rate = document.getElementById('rate').value || 0;
@@ -423,7 +440,6 @@
       const kwhVal = parseFloat(kwh);
       const rateVal = parseFloat(rate);
       const totalPrice = parseFloat((kwhVal * rateVal).toFixed(2));
-      const car = getCurrentCar();
 
       car.logs.push({
         odo: parseFloat(odo),
@@ -448,7 +464,7 @@
       const logs = car.logs || [];
       let totalCost = logs.reduce((acc, i) => acc + parseFloat(i.totalPrice || i.price || 0), 0);
       let totalKwh = logs.reduce((acc, i) => acc + parseFloat(i.kwh || 0), 0);
-      Telegram.WebApp.showAlert(`Авто: ${car.name}\nСессий: ${logs.length}\nЭнергия: ${totalKwh.toFixed(1)} кВт⋅ч\nЗатраты: ${Math.round(totalCost)} ₽`);
+      Telegram.WebApp.showAlert(`Авто: ${car.name}\nДоступ: ${car.role === 'readonly' ? 'Просмотр' : 'Владелец'}\nСессий: ${logs.length}\nЭнергия: ${totalKwh.toFixed(1)} кВт⋅ч\nЗатраты: ${Math.round(totalCost)} ₽`);
     }
 
     function openExportModal() {
@@ -460,7 +476,7 @@
         return;
       }
 
-      let tableText = `Отчет: ${car.name} (Код: ${car.id})\nДата\tВремя\tТекущий пробег (км)\tЗаряжено (кВт⋅ч)\tТариф (₽/кВт⋅ч)\tИтого (₽)\n`;
+      let tableText = `Отчет: ${car.name} (Код: ${car.viewCode || car.id})\nДата\tВремя\tТекущий пробег (км)\tЗаряжено (кВт⋅ч)\tТариф (₽/кВт⋅ч)\tИтого (₽)\n`;
       logs.forEach(item => {
         const d = new Date(item.date);
         const dateStr = d.toLocaleDateString('ru-RU');
@@ -484,10 +500,15 @@
     }
 
     function clearData() {
+      const car = getCurrentCar();
+      if (car.role === 'readonly') {
+        Telegram.WebApp.showAlert('⛔ Вы не можете очистить историю чужого авто.');
+        return;
+      }
       haptic('warning');
       Telegram.WebApp.showConfirm('Очистить историю для текущего авто?', function(confirmed) {
         if (confirmed) {
-          getCurrentCar().logs = [];
+          car.logs = [];
           saveGarage();
           render();
           haptic('success');
