@@ -7,8 +7,6 @@
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <!-- Библиотека генерации Excel на клиенте -->
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
   <style>
     body {
       background: #f0f4f8;
@@ -100,10 +98,10 @@
   <div class="card-clean rounded-2xl p-4 mb-3 space-y-2.5">
     <div class="text-xs font-bold uppercase tracking-wider text-blue-600">➕ Новая зарядная сессия</div>
     <div class="grid grid-cols-2 gap-2">
-      <input id="odo" type="number" onfocus="haptic('light')" placeholder="Текущий одометр (км)" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition">
+      <input id="odo" type="number" onfocus="haptic('light')" placeholder="Текущий пробег (км)" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition">
       <input id="kwh" type="number" step="any" onfocus="haptic('light')" placeholder="Заряжено (кВт⋅ч)" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition">
     </div>
-    <input id="price" type="number" step="any" onfocus="haptic('light')" placeholder="Стоимость зарядки (₽)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition">
+    <input id="rate" type="number" step="any" onfocus="haptic('light')" placeholder="Тариф за 1 кВт⋅ч (₽)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition">
     <button onclick="saveData()" class="w-full accent-blue text-white hover:opacity-95 active:scale-[0.98] font-bold py-3 rounded-xl text-xs uppercase tracking-wider transition shadow-md shadow-blue-500/20">
       💾 Сохранить сессию
     </button>
@@ -114,7 +112,7 @@
     <button onclick="haptic('medium'); location.reload();" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-slate-600">
       🔄 <span>Обновить</span>
     </button>
-    <button onclick="exportToExcel()" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-blue-600">
+    <button onclick="openExportModal()" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-blue-600">
       📊 <span>Экспорт</span>
     </button>
     <button onclick="showReport()" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-slate-600">
@@ -123,6 +121,26 @@
     <button onclick="clearData()" class="card-clean p-2.5 rounded-xl hover:bg-rose-50 active:scale-95 transition flex flex-col items-center gap-1 text-rose-500">
       ⚙️ <span>Сброс</span>
     </button>
+  </div>
+
+  <!-- Модальное окно экспорта -->
+  <div id="exportModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-sm rounded-2xl p-4 shadow-2xl border border-slate-100 flex flex-col">
+      <div class="flex justify-between items-center mb-2">
+        <h3 class="text-sm font-bold text-blue-600">📊 Экспорт данных (Excel)</h3>
+        <button onclick="closeExportModal()" class="text-slate-400 hover:text-slate-600 text-lg font-bold">✕</button>
+      </div>
+      <p class="text-[11px] text-slate-500 mb-2">Нажмите кнопку ниже, чтобы скопировать готовую таблицу со всеми расчетами:</p>
+      <textarea id="exportText" readonly class="w-full h-36 bg-slate-50 border border-slate-200 rounded-xl p-2 text-[10px] font-mono text-slate-700 outline-none mb-3"></textarea>
+      <div class="flex gap-2">
+        <button onclick="copyExportData()" class="flex-1 accent-blue text-white py-2.5 rounded-xl text-xs font-bold active:scale-95 transition">
+          📋 Скопировать всё
+        </button>
+        <button onclick="closeExportModal()" class="px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 py-2.5 rounded-xl text-xs font-bold">
+          Закрыть
+        </button>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -171,7 +189,7 @@
       db.forEach(i => {
         const kwh = parseFloat(i.kwh || 0);
         totalKwh += kwh;
-        totalCost += parseFloat(i.price || 0);
+        totalCost += parseFloat(i.totalPrice || i.price || 0);
         
         if (i.date) {
           const d = new Date(i.date);
@@ -200,9 +218,10 @@
       if (db.length > 0) {
         const last = db[db.length - 1];
         const percent = Math.min(100, Math.round((last.kwh / BATTERY_CAP) * 100));
+        const cost = last.totalPrice ? Math.round(last.totalPrice) : Math.round(last.price || 0);
         document.getElementById('soc-val').innerText = `${percent}%`;
         document.getElementById('circle-bar').setAttribute('stroke-dasharray', `${percent}, 100`);
-        document.getElementById('last-charge-text').innerText = `🔋 +${last.kwh} кВт⋅ч (${last.price} ₽)`;
+        document.getElementById('last-charge-text').innerText = `🔋 +${last.kwh} кВт⋅ч (${cost} ₽)`;
         document.getElementById('progress-bar').style.width = `${percent}%`;
       } else {
         document.getElementById('soc-val').innerText = `0%`;
@@ -215,59 +234,80 @@
     function saveData() {
       const odo = document.getElementById('odo').value;
       const kwh = document.getElementById('kwh').value;
-      const price = document.getElementById('price').value || 0;
+      const rate = document.getElementById('rate').value || 0;
+
       if (!odo || !kwh) {
         haptic('warning');
-        Telegram.WebApp.showAlert('Заполните одометр и объем заряда в кВт⋅ч!');
+        Telegram.WebApp.showAlert('Заполните пробег и количество кВт⋅ч!');
         return;
       }
-      db.push({ odo: parseFloat(odo), kwh: parseFloat(kwh), price: parseFloat(price), date: new Date().toISOString() });
+
+      const kwhVal = parseFloat(kwh);
+      const rateVal = parseFloat(rate);
+      const totalPrice = parseFloat((kwhVal * rateVal).toFixed(2));
+
+      db.push({
+        odo: parseFloat(odo),
+        kwh: kwhVal,
+        rate: rateVal,
+        totalPrice: totalPrice,
+        price: totalPrice,
+        date: new Date().toISOString()
+      });
+
       localStorage.setItem('ev_logs', JSON.stringify(db));
       document.getElementById('odo').value = '';
       document.getElementById('kwh').value = '';
-      document.getElementById('price').value = '';
+      document.getElementById('rate').value = '';
       haptic('success');
       render();
     }
 
     function showReport() {
       haptic('light');
-      let totalCost = db.reduce((acc, i) => acc + parseFloat(i.price || 0), 0);
+      let totalCost = db.reduce((acc, i) => acc + parseFloat(i.totalPrice || i.price || 0), 0);
       let totalKwh = db.reduce((acc, i) => acc + parseFloat(i.kwh || 0), 0);
-      Telegram.WebApp.showAlert(`Всего сессий: ${db.length}\nПринято энергии: ${totalKwh.toFixed(1)} кВт⋅ч\nЗатраты: ${Math.round(totalCost)} ₽`);
+      Telegram.WebApp.showAlert(`Всего сессий: ${db.length}\nПринято энергии: ${totalKwh.toFixed(1)} кВт⋅ч\nОбщие затраты: ${Math.round(totalCost)} ₽`);
     }
 
-    function exportToExcel() {
+    function openExportModal() {
       haptic('medium');
       if (!db || db.length === 0) {
-        Telegram.WebApp.showAlert('История пуста. Сначала добавьте хотя бы одну запись.');
+        Telegram.WebApp.showAlert('История пуста. Сначала сохраните хотя бы одну сессию.');
         return;
       }
 
-      try {
-        // Подготовка строк таблицы
-        const rows = db.map((item, idx) => {
-          const d = new Date(item.date);
-          return {
-            "№": idx + 1,
-            "Дата": d.toLocaleDateString('ru-RU'),
-            "Время": d.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'}),
-            "Одометр (км)": Number(item.odo),
-            "Заряжено (кВт⋅ч)": Number(item.kwh),
-            "Стоимость (₽)": Number(item.price)
-          };
-        });
+      let tableText = "Дата\tВремя\tТекущий пробег (км)\tЗаряжено (кВт⋅ч)\tТариф (₽/кВт⋅ч)\tИтого (₽)\n";
+      db.forEach(item => {
+        const d = new Date(item.date);
+        const dateStr = d.toLocaleDateString('ru-RU');
+        const timeStr = d.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'});
+        const rateStr = item.rate !== undefined ? item.rate : '-';
+        const total = item.totalPrice !== undefined ? item.totalPrice : (item.price || 0);
+        tableText += `${dateStr}\t${timeStr}\t${item.odo}\t${item.kwh}\t${rateStr}\t${total}\n`;
+      });
 
-        const ws = XLSX.utils.json_to_sheet(rows);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Журнал зарядок");
+      document.getElementById('exportText').value = tableText;
+      document.getElementById('exportModal').classList.remove('hidden');
+    }
 
-        // Прямое скачивание xlsx файла
-        XLSX.writeFile(wb, `EV_Garage_Geely_EX5_${new Date().toISOString().slice(0,10)}.xlsx`);
-        haptic('success');
-      } catch (err) {
-        Telegram.WebApp.showAlert('Ошибка при экспорте: ' + err.message);
-      }
+    function closeExportModal() {
+      document.getElementById('exportModal').classList.add('hidden');
+    }
+
+    function copyExportData() {
+      haptic('success');
+      const text = document.getElementById('exportText').value;
+      navigator.clipboard.writeText(text).then(() => {
+        Telegram.WebApp.showAlert('✅ Таблица скопирована в буфер обмена!\n\nВставьте данные в Excel или Google Таблицы.');
+        closeExportModal();
+      }).catch(() => {
+        const textarea = document.getElementById('exportText');
+        textarea.select();
+        document.execCommand('copy');
+        Telegram.WebApp.showAlert('✅ Таблица скопирована!');
+        closeExportModal();
+      });
     }
 
     function clearData() {
