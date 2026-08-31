@@ -18,7 +18,7 @@
   </style>
 </head>
 <body class="p-3.5 select-none min-h-screen pb-12">
-  <script>window.Telegram.WebApp.expand();</script>
+  <script>try{ window.Telegram.WebApp.expand(); }catch(e){}</script>
 
   <!-- Селектор авто -->
   <div class="card-clean rounded-2xl p-3 mb-3">
@@ -170,11 +170,11 @@
     </button>
   </div>
 
-  <!-- Модалки -->
+  <!-- Модалка авто -->
   <div id="carModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
     <div class="bg-white w-full max-w-sm rounded-2xl p-4 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
       <h3 id="modalTitle" class="text-sm font-bold text-blue-600 mb-1">⚙️ Параметры и тарифы</h3>
-      <p class="text-[11px] text-slate-400 mb-3">Данные будут сохранены в центральную базу.</p>
+      <p class="text-[11px] text-slate-400 mb-3">Данные сохраняются в центральную базу.</p>
       
       <div class="space-y-2.5 mb-4">
         <div>
@@ -254,30 +254,65 @@
     
     let supabase = null;
     try {
-      supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+      if (window.supabase) {
+        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+      }
     } catch(e){}
 
-    const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user || { id: 0, first_name: 'Пользователь' };
-    const currentUserId = tgUser.id || 'owner_main';
+    const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user || { id: 'driver_1', first_name: 'Водитель' };
+    const currentUserId = String(tgUser.id || 'driver_1');
     const currentUserName = tgUser.first_name || 'Водитель';
 
-    let allCars = JSON.parse(localStorage.getItem('ev_global_cars') || '[]');
-    let selectedCarId = localStorage.getItem('ev_active_car_id') || '';
-    let currentFilter = 'all';
-    let chartMode = 'weekday';
-    let chartInstance = null;
-
-    if (allCars.length === 0) {
-      allCars.push({
+    function createDefaultCar() {
+      return {
         id: 'car_' + currentUserId,
         name: 'Geely EX5 EM-i',
         capacity: 18.7,
         rates: { night: 2.8, day: 6.5, work: 0, ez: 19.0 },
-        owner_id: String(currentUserId),
+        owner_id: currentUserId,
         owner_name: currentUserName,
         logs: JSON.parse(localStorage.getItem('ev_logs') || '[]')
-      });
-      selectedCarId = allCars[0].id;
+      };
+    }
+
+    let allCars = JSON.parse(localStorage.getItem('ev_global_cars') || '[]');
+    if (!Array.isArray(allCars) || allCars.length === 0) {
+      allCars = [createDefaultCar()];
+      localStorage.setItem('ev_global_cars', JSON.stringify(allCars));
+    }
+
+    let selectedCarId = localStorage.getItem('ev_active_car_id') || allCars[0].id;
+    let currentFilter = 'all';
+    let chartMode = 'weekday';
+    let chartInstance = null;
+
+    function notify(msg) {
+      try {
+        if (window.Telegram?.WebApp?.showAlert) window.Telegram.WebApp.showAlert(msg);
+        else alert(msg);
+      } catch(e){ alert(msg); }
+    }
+
+    function haptic(type) {
+      try {
+        if (window.Telegram?.WebApp?.HapticFeedback) {
+          if (type === 'light') Telegram.WebApp.HapticFeedback.impactOccurred('light');
+          if (type === 'medium') Telegram.WebApp.HapticFeedback.impactOccurred('medium');
+          if (type === 'success') Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+          if (type === 'warning') Telegram.WebApp.HapticFeedback.notificationOccurred('warning');
+        }
+      } catch(e){}
+    }
+
+    function getUserCar() { 
+      return allCars.find(c => String(c.owner_id || c.ownerId) === currentUserId); 
+    }
+
+    function getSelectedCar() { 
+      let c = allCars.find(c => c.id === selectedCarId);
+      if (!c) c = allCars[0] || createDefaultCar();
+      if (!c.rates) c.rates = { night: 2.8, day: 6.5, work: 0, ez: 19.0 };
+      return c;
     }
 
     async function fetchFromCloud() {
@@ -285,8 +320,15 @@
       document.getElementById('cloud-badge').innerText = 'СИНХРОН...';
       try {
         const { data, error } = await supabase.from('ev_cars').select('*');
-        if (!error && data && data.length > 0) {
-          allCars = data;
+        if (!error && data) {
+          if (data.length > 0) {
+            allCars = data;
+          } else {
+            // Если база пустая — сразу заливаем в неё локальное авто
+            const myCar = getUserCar() || createDefaultCar();
+            allCars = [myCar];
+            await syncCarToCloud(myCar);
+          }
           localStorage.setItem('ev_global_cars', JSON.stringify(allCars));
           document.getElementById('cloud-badge').innerText = 'БД OK';
           updateCatalogUI();
@@ -311,29 +353,13 @@
           rates: car.rates,
           owner_id: String(car.owner_id || car.ownerId),
           owner_name: car.owner_name || car.ownerName,
-          logs: car.logs,
+          logs: car.logs || [],
           updated_at: new Date().toISOString()
         });
         document.getElementById('cloud-badge').innerText = 'БД OK';
       } catch(e) {
         document.getElementById('cloud-badge').innerText = 'ОШИБКА БД';
       }
-    }
-
-    function getUserCar() { return allCars.find(c => String(c.owner_id || c.ownerId) === String(currentUserId)); }
-    function getSelectedCar() { 
-      const c = allCars.find(c => c.id === selectedCarId) || allCars[0];
-      if (!c.rates) c.rates = { night: 2.8, day: 6.5, work: 0, ez: 19.0 };
-      return c;
-    }
-
-    function haptic(type) {
-      try {
-        if (type === 'light') Telegram.WebApp.HapticFeedback.impactOccurred('light');
-        if (type === 'medium') Telegram.WebApp.HapticFeedback.impactOccurred('medium');
-        if (type === 'success') Telegram.WebApp.HapticFeedback.notificationOccurred('success');
-        if (type === 'warning') Telegram.WebApp.HapticFeedback.notificationOccurred('warning');
-      } catch(e){}
     }
 
     function applyPreset(rateVal, label) {
@@ -410,7 +436,7 @@
       allCars.forEach(car => {
         const opt = document.createElement('option');
         opt.value = car.id;
-        const isMine = String(car.owner_id || car.ownerId) === String(currentUserId);
+        const isMine = String(car.owner_id || car.ownerId) === currentUserId;
         opt.innerText = `${car.name} (${car.owner_name || car.ownerName || 'Владелец'})${isMine ? ' ⭐ Моё' : ''}`;
         if (car.id === selectedCarId) opt.selected = true;
         select.appendChild(opt);
@@ -427,7 +453,7 @@
       }
 
       const car = getSelectedCar();
-      const isOwner = String(car.owner_id || car.ownerId) === String(currentUserId);
+      const isOwner = String(car.owner_id || car.ownerId) === currentUserId;
 
       document.getElementById('owner-name-label').innerText = car.owner_name || car.ownerName || 'Владелец';
       document.getElementById('car-badge-name').innerText = car.name;
@@ -477,13 +503,13 @@
 
       if (myCar) {
         title.innerText = '⚙️ Параметры и тарифы';
-        nameInput.value = myCar.name;
-        capInput.value = myCar.capacity;
+        nameInput.value = myCar.name || '';
+        capInput.value = myCar.capacity || 18.7;
         const r = myCar.rates || { night: 2.8, day: 6.5, work: 0, ez: 19.0 };
         nightInput.value = r.night; dayInput.value = r.day; workInput.value = r.work; ezInput.value = r.ez;
       } else {
         title.innerText = '➕ Добавить свой автомобиль';
-        nameInput.value = ''; capInput.value = ''; nightInput.value = 2.8; dayInput.value = 6.5; workInput.value = 0; ezInput.value = 19.0;
+        nameInput.value = ''; capInput.value = 18.7; nightInput.value = 2.8; dayInput.value = 6.5; workInput.value = 0; ezInput.value = 19.0;
       }
       modal.classList.remove('hidden');
     }
@@ -499,7 +525,7 @@
       const ez = parseFloat(document.getElementById('rateEzInput').value) || 0;
 
       if (!name || isNaN(cap) || cap <= 0) {
-        Telegram.WebApp.showAlert('Заполните модель и емкость батареи!');
+        notify('Заполните модель и емкость батареи!');
         return;
       }
 
@@ -514,7 +540,7 @@
           name: name,
           capacity: cap,
           rates: { night, day, work, ez },
-          owner_id: String(currentUserId),
+          owner_id: currentUserId,
           owner_name: currentUserName,
           logs: []
         };
@@ -526,7 +552,7 @@
       closeCarModal();
       updateCatalogUI();
       render();
-      Telegram.WebApp.showAlert(`✅ Автомобиль сохранен в базе данных!`);
+      notify(`✅ Автомобиль "${name}" сохранен в базе!`);
     }
 
     function initChart() {
@@ -584,7 +610,7 @@
 
     function renderRecentLogs() {
       const car = getSelectedCar();
-      const isOwner = String(car.owner_id || car.ownerId) === String(currentUserId);
+      const isOwner = String(car.owner_id || car.ownerId) === currentUserId;
       const container = document.getElementById('recentLogsContainer');
       const logs = car.logs || [];
 
@@ -620,15 +646,14 @@
 
     async function deleteLogEntry(idx) {
       haptic('warning');
-      Telegram.WebApp.showConfirm('Удалить эту сессию зарядки?', async function(confirmed) {
-        if (confirmed) {
-          const car = getSelectedCar();
-          car.logs.splice(idx, 1);
-          await syncCarToCloud(car);
-          render();
-          haptic('success');
-        }
-      });
+      const ok = confirm('Удалить эту сессию зарядки?');
+      if (ok) {
+        const car = getSelectedCar();
+        car.logs.splice(idx, 1);
+        await syncCarToCloud(car);
+        render();
+        haptic('success');
+      }
     }
 
     function render() {
@@ -675,8 +700,8 @@
 
     async function saveData() {
       const car = getSelectedCar();
-      if (String(car.owner_id || car.ownerId) !== String(currentUserId)) {
-        Telegram.WebApp.showAlert('⛔ Вы не можете добавлять сессии в чужой профиль!');
+      if (String(car.owner_id || car.ownerId) !== currentUserId) {
+        notify('⛔ Вы не можете добавлять сессии в чужой профиль!');
         return;
       }
 
@@ -687,7 +712,7 @@
 
       if (!odo || !kwh) {
         haptic('warning');
-        Telegram.WebApp.showAlert('Заполните пробег и количество кВт⋅ч!');
+        notify('Заполните пробег и количество кВт⋅ч!');
         return;
       }
 
@@ -695,6 +720,7 @@
       const rateVal = parseFloat(rate);
       const totalPrice = parseFloat((kwhVal * rateVal).toFixed(2));
 
+      if (!car.logs) car.logs = [];
       car.logs.push({
         odo: parseFloat(odo),
         kwh: kwhVal,
@@ -754,18 +780,18 @@
       const data = generateReportPayload();
       const botToken = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU';
       const chatId = tgUser.id;
-      if (!chatId) { Telegram.WebApp.showAlert('Откройте WebApp в Telegram.'); return; }
+      if (!chatId) { notify('Откройте WebApp в Telegram.'); return; }
 
       fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chat_id: chatId, text: data.reportText })
       }).then(() => {
-        Telegram.WebApp.showAlert('✅ Отчет отправлен в чат боту!');
+        notify('✅ Отчет отправлен в чат боту!');
         closeReportModal();
       }).catch(() => {
         navigator.clipboard.writeText(data.reportText);
-        Telegram.WebApp.showAlert('✅ Отчет скопирован в буфер!');
+        notify('✅ Отчет скопирован в буфер!');
         closeReportModal();
       });
     }
@@ -773,7 +799,7 @@
     function copyReportText() {
       haptic('success');
       navigator.clipboard.writeText(generateReportPayload().reportText).then(() => {
-        Telegram.WebApp.showAlert('✅ Текст скопирован!');
+        notify('✅ Текст скопирован!');
         closeReportModal();
       });
     }
@@ -782,7 +808,7 @@
       haptic('medium');
       const car = getSelectedCar();
       const logs = getFilteredLogs();
-      if (logs.length === 0) { Telegram.WebApp.showAlert('История пуста.'); return; }
+      if (logs.length === 0) { notify('История пуста.'); return; }
 
       let tableText = `Отчет (${currentFilter}): ${car.name}\nДата\tВремя\tЛокация\tПробег (км)\tЗаряжено (кВт⋅ч)\tТариф (₽)\tИтого (₽)\n`;
       logs.forEach(item => {
@@ -799,28 +825,27 @@
     function copyExportData() {
       haptic('success');
       navigator.clipboard.writeText(document.getElementById('exportText').value).then(() => {
-        Telegram.WebApp.showAlert('✅ Таблица скопирована!');
+        notify('✅ Таблица скопирована!');
         closeExportModal();
       });
     }
 
     async function clearData() {
       const car = getSelectedCar();
-      if (String(car.owner_id || car.ownerId) !== String(currentUserId)) {
-        Telegram.WebApp.showAlert('⛔ Чужой профиль нельзя сбросить!');
+      if (String(car.owner_id || car.ownerId) !== currentUserId) {
+        notify('⛔ Чужой профиль нельзя сбросить!');
         return;
       }
       haptic('warning');
-      Telegram.WebApp.showConfirm('Очистить журнал своего автомобиля?', async function(confirmed) {
-        if (confirmed) {
-          car.logs = [];
-          await syncCarToCloud(car);
-          populateMonthSelect();
-          render();
-          haptic('success');
-          Telegram.WebApp.showAlert('Журнал очищен.');
-        }
-      });
+      const ok = confirm('Очистить журнал своего автомобиля?');
+      if (ok) {
+        car.logs = [];
+        await syncCarToCloud(car);
+        populateMonthSelect();
+        render();
+        haptic('success');
+        notify('Журнал очищен.');
+      }
     }
 
     initChart();
