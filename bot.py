@@ -7,9 +7,9 @@ import telebot
 from telebot import types
 
 TOKEN = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU'
-WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=15'
+WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=16'
 
-# Фоновый веб-сервер для удержания на Render
+# Фоновый сервер для Render 24/7
 class SimpleHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -32,10 +32,6 @@ bot = telebot.TeleBot(TOKEN)
 @bot.message_handler(func=lambda m: True)
 def handle_all(message):
     try:
-        # Убираем серую клавиатуру
-        remove_markup = types.ReplyKeyboardRemove()
-        
-        # Кнопка запуска WebApp
         kb = types.InlineKeyboardMarkup()
         btn = types.InlineKeyboardButton(text="⚡ Открыть EV Garage", web_app=types.WebAppInfo(url=WEB_APP_URL))
         kb.add(btn)
@@ -54,15 +50,11 @@ def handle_all(message):
             parse_mode="Markdown",
             reply_markup=kb
         )
-        
-        # Удаление старых кнопок
-        bot.send_message(message.chat.id, "Клавиатура очищена.", reply_markup=remove_markup)
     except Exception as e:
         print("Error:", e)
 
 if __name__ == '__main__':
-    print("BOT STARTED")
-    # Снимаем зависшие вебхуки Telegram перед запуском
+    print("BOT RUNNING")
     try:
         bot.remove_webhook()
     except Exception:
@@ -72,5 +64,4 @@ if __name__ == '__main__':
         try:
             bot.infinity_polling(skip_pending=True, timeout=15)
         except Exception as e:
-            print("Restarting polling due to:", e)
             time.sleep(3)
