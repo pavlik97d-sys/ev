@@ -7,7 +7,6 @@
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { background: #f0f4f8; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #1e293b; }
     .card-clean { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 4px 20px -2px rgba(37, 99, 235, 0.06); }
@@ -170,11 +169,11 @@
     </button>
   </div>
 
-  <!-- Модалка авто и тарифов -->
+  <!-- Модалка параметров авто -->
   <div id="carModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
     <div class="bg-white w-full max-w-sm rounded-2xl p-4 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
       <h3 id="modalTitle" class="text-sm font-bold text-blue-600 mb-1">⚙️ Параметры и тарифы</h3>
-      <p class="text-[11px] text-slate-400 mb-3">Задайте модель и ваши стандартные цены за 1 кВт⋅ч.</p>
+      <p class="text-[11px] text-slate-400 mb-3">Задайте модель авто и стандартные цены за 1 кВт⋅ч.</p>
       
       <div class="space-y-2.5 mb-4">
         <div>
@@ -249,15 +248,8 @@
   </div>
 
   <script>
-    const SUPABASE_URL = 'https://smxvjnlbwiaoudwlbvud.supabase.co';
+    const SUPABASE_REST = 'https://smxvjnlbwiaoudwlbvud.supabase.co/rest/v1/ev_cars';
     const SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2';
-    
-    let supabase = null;
-    try {
-      if (window.supabase) {
-        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-      }
-    } catch(e){}
 
     const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user || { id: 'owner_main', first_name: 'Водитель' };
     const currentUserId = String(tgUser.id || 'owner_main');
@@ -278,7 +270,7 @@
     let allCars = [];
     try {
       allCars = JSON.parse(localStorage.getItem('ev_global_cars') || '[]');
-    } catch(e){ allCars = []; }
+    } catch(e) { allCars = []; }
 
     if (!Array.isArray(allCars) || allCars.length === 0) {
       allCars = [createDefaultCar()];
@@ -294,7 +286,7 @@
       try {
         if (window.Telegram?.WebApp?.showAlert) window.Telegram.WebApp.showAlert(msg);
         else alert(msg);
-      } catch(e){ alert(msg); }
+      } catch(e) { alert(msg); }
     }
 
     function haptic(type) {
@@ -308,11 +300,11 @@
       } catch(e){}
     }
 
-    function getUserCar() { 
-      return allCars.find(c => String(c.owner_id || c.ownerId) === currentUserId); 
+    function getUserCar() {
+      return allCars.find(c => String(c.owner_id || c.ownerId) === currentUserId);
     }
 
-    function getSelectedCar() { 
+    function getSelectedCar() {
       let c = allCars.find(c => c.id === selectedCarId);
       if (!c) c = allCars[0] || createDefaultCar();
       if (!c.rates) c.rates = { night: 2.8, day: 6.5, work: 0, ez: 19.0 };
@@ -320,48 +312,60 @@
     }
 
     async function fetchFromCloud() {
-      if (!supabase) return;
       const badge = document.getElementById('cloud-badge');
       if (badge) badge.innerText = 'СИНХРОН...';
       try {
-        const { data, error } = await supabase.from('ev_cars').select('*');
-        if (!error && data && data.length > 0) {
-          allCars = data;
-          localStorage.setItem('ev_global_cars', JSON.stringify(allCars));
-          if (badge) badge.innerText = 'БД OK';
-          updateCatalogUI();
-          render();
-        } else {
-          // Если база пустая - запишем текущее авто
-          const myCar = getUserCar() || createDefaultCar();
-          await syncCarToCloud(myCar);
+        const res = await fetch(`${SUPABASE_REST}?select=*`, {
+          headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && data.length > 0) {
+            allCars = data;
+            localStorage.setItem('ev_global_cars', JSON.stringify(allCars));
+            if (badge) badge.innerText = 'БД OK';
+            updateCatalogUI();
+            render();
+            return;
+          }
         }
-      } catch(e) {
-        if (badge) badge.innerText = 'ЛОКАЛЬНО';
-      }
+      } catch(e){}
+      if (badge) badge.innerText = 'ЛОКАЛЬНО';
     }
 
     async function syncCarToCloud(car) {
       localStorage.setItem('ev_global_cars', JSON.stringify(allCars));
       localStorage.setItem('ev_active_car_id', selectedCarId);
-      if (!supabase) return;
 
       const badge = document.getElementById('cloud-badge');
       if (badge) badge.innerText = 'СОХРАНЕНИЕ...';
+
+      const payload = {
+        id: car.id,
+        name: car.name,
+        capacity: Number(car.capacity || 18.7),
+        rates: car.rates,
+        owner_id: String(car.owner_id || car.ownerId),
+        owner_name: car.owner_name || car.ownerName,
+        logs: car.logs || [],
+        updated_at: new Date().toISOString()
+      };
+
       try {
-        await supabase.from('ev_cars').upsert({
-          id: car.id,
-          name: car.name,
-          capacity: car.capacity,
-          rates: car.rates,
-          owner_id: String(car.owner_id || car.ownerId),
-          owner_name: car.owner_name || car.ownerName,
-          logs: car.logs || [],
-          updated_at: new Date().toISOString()
+        const res = await fetch(SUPABASE_REST, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'resolution=merge-duplicates'
+          },
+          body: JSON.stringify(payload)
         });
-        if (badge) badge.innerText = 'БД OK';
+        if (res.ok && badge) badge.innerText = 'БД OK';
+        else if (badge) badge.innerText = 'ЛОКАЛЬНО';
       } catch(e) {
-        if (badge) badge.innerText = 'ОШИБКА БД';
+        if (badge) badge.innerText = 'ЛОКАЛЬНО';
       }
     }
 
@@ -853,7 +857,7 @@
       }
     }
 
-    // Старт
+    // Инициализация при загрузке
     initChart();
     updateCatalogUI();
     render();
