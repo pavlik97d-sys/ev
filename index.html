@@ -52,7 +52,7 @@
     </div>
   </div>
 
-  <!-- 2. Форма новой зарядки (УВЕЛИЧЕННАЯ НАВЕРХУ) -->
+  <!-- 2. Форма новой зарядки (НАВЕРХУ) -->
   <div id="chargeFormCard" class="card-clean rounded-2xl p-4 space-y-3 border-blue-100 bg-gradient-to-b from-blue-50/30 to-white shadow-sm">
     <div class="flex items-center justify-between">
       <div class="text-xs font-bold uppercase tracking-wider text-blue-700 flex items-center gap-1.5">
@@ -72,7 +72,7 @@
       </div>
     </div>
 
-    <!-- Быстрые пресеты тарифов -->
+    <!-- Быстрые тарифы -->
     <div>
       <label class="text-[10px] uppercase font-bold text-slate-400 mb-1 block">Быстрый тариф:</label>
       <div id="presetsContainer" class="flex gap-1.5 overflow-x-auto py-0.5"></div>
@@ -112,30 +112,26 @@
     </select>
   </div>
 
-  <!-- 4. Карточки ключевых показателей (Вместо круга) -->
+  <!-- 4. Карточки ключевых показателей -->
   <div class="grid grid-cols-2 gap-2.5">
-    <!-- Затраты -->
     <div class="card-clean rounded-2xl p-3.5 border-l-4 border-emerald-500">
       <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">💰 Затраты</div>
       <div id="period-cost" class="text-xl font-black text-slate-800 mt-0.5">0 ₽</div>
       <div id="cost-per-km-label" class="text-[10px] font-semibold text-emerald-600 mt-0.5">0.00 ₽ / км</div>
     </div>
 
-    <!-- Энергия -->
     <div class="card-clean rounded-2xl p-3.5 border-l-4 border-blue-500">
       <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">⚡ Энергия</div>
       <div id="period-kwh" class="text-xl font-black text-slate-800 mt-0.5">0 кВт⋅ч</div>
       <div id="sessions-count-label" class="text-[10px] font-semibold text-blue-600 mt-0.5">0 сессий</div>
     </div>
 
-    <!-- Средний расход -->
     <div class="card-clean rounded-2xl p-3.5 border-l-4 border-amber-500">
       <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">📉 Средний расход</div>
       <div id="avg-cons" class="text-lg font-black text-slate-800 mt-0.5">0.0</div>
       <div class="text-[10px] font-medium text-slate-400">кВт⋅ч / 100 км</div>
     </div>
 
-    <!-- Пройденная дистанция -->
     <div class="card-clean rounded-2xl p-3.5 border-l-4 border-indigo-500">
       <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">🛣️ Дистанция</div>
       <div id="period-dist" class="text-lg font-black text-slate-800 mt-0.5">0 км</div>
@@ -184,11 +180,11 @@
     </button>
   </div>
 
-  <!-- Модалка авто -->
+  <!-- Модалка авто + Со-водители -->
   <div id="carModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
     <div class="bg-white w-full max-w-sm rounded-2xl p-4 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
       <h3 id="modalTitle" class="text-sm font-bold text-blue-600 mb-1">⚙️ Параметры и тарифы</h3>
-      <p class="text-[11px] text-slate-400 mb-3">Задайте модель авто и стандартные цены за 1 кВт⋅ч.</p>
+      <p class="text-[11px] text-slate-400 mb-3">Настройте автомобиль, цены за кВт⋅ч и доступ со-водителей.</p>
       
       <div class="space-y-2.5 mb-4">
         <div>
@@ -199,6 +195,20 @@
           <label class="text-[10px] font-bold text-slate-400 uppercase">Емкость батареи (кВт⋅ч):</label>
           <input id="carCapInput" type="number" step="any" placeholder="18.7" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs outline-none focus:border-blue-500">
         </div>
+
+        <!-- Поле со-водителей -->
+        <div class="border-t border-slate-100 pt-2">
+          <label class="text-[10px] font-bold text-blue-600 uppercase flex items-center justify-between">
+            <span>👥 Telegram ID со-водителей:</span>
+          </label>
+          <input id="carDriversInput" type="text" placeholder="Напр. 123456789, 987654321" class="w-full bg-blue-50/50 border border-blue-200 rounded-xl p-2 text-xs outline-none focus:border-blue-500 mt-1">
+          <p class="text-[9px] text-slate-400 mt-1">Укажите цифровые Telegram ID тех, кому разрешено вносить зарядки в вашу машину (через запятую).</p>
+          <div class="mt-1 bg-slate-50 border border-slate-200 p-1.5 rounded-lg text-[9px] text-slate-500 flex justify-between items-center">
+            <span>Ваш Telegram ID: <b id="my-tg-id-text" class="text-slate-800">--</b></span>
+            <button onclick="copyMyId()" class="text-blue-600 font-bold hover:underline">Скопировать</button>
+          </div>
+        </div>
+
         <div class="border-t border-slate-100 pt-2">
           <div class="text-[11px] font-bold text-slate-700 mb-2">⚡ Тарифы по умолчанию (₽/кВт⋅ч):</div>
           <div class="grid grid-cols-2 gap-2">
@@ -280,6 +290,7 @@
         rates: { night: 2.8, day: 6.5, work: 0, ez: 19.0 },
         owner_id: currentUserId,
         owner_name: currentUserName,
+        drivers: [],
         logs: JSON.parse(localStorage.getItem('ev_logs') || '[]')
       };
     }
@@ -317,6 +328,13 @@
       } catch(e){}
     }
 
+    function copyMyId() {
+      haptic('success');
+      navigator.clipboard.writeText(currentUserId).then(() => {
+        notify(`Ваш ID скопирован: ${currentUserId}`);
+      });
+    }
+
     function getUserCar() {
       return allCars.find(c => String(c.owner_id || c.ownerId) === currentUserId);
     }
@@ -325,7 +343,14 @@
       let c = allCars.find(c => c.id === selectedCarId);
       if (!c) c = allCars[0] || createDefaultCar();
       if (!c.rates) c.rates = { night: 2.8, day: 6.5, work: 0, ez: 19.0 };
+      if (!Array.isArray(c.drivers)) c.drivers = [];
       return c;
+    }
+
+    function checkCanEdit(car) {
+      const isOwner = String(car.owner_id || car.ownerId) === currentUserId;
+      const isDriver = Array.isArray(car.drivers) && car.drivers.map(String).includes(currentUserId);
+      return { isOwner, isDriver, canEdit: isOwner || isDriver };
     }
 
     async function fetchFromCloud() {
@@ -364,6 +389,7 @@
         rates: car.rates,
         owner_id: String(car.owner_id || car.ownerId),
         owner_name: car.owner_name || car.ownerName,
+        drivers: car.drivers || [],
         logs: car.logs || [],
         updated_at: new Date().toISOString()
       };
@@ -462,8 +488,11 @@
       allCars.forEach(car => {
         const opt = document.createElement('option');
         opt.value = car.id;
-        const isMine = String(car.owner_id || car.ownerId) === currentUserId;
-        opt.innerText = `${car.name} (${car.owner_name || car.ownerName || 'Владелец'})${isMine ? ' ⭐ Моё' : ''}`;
+        const { isOwner, isDriver } = checkCanEdit(car);
+        let tag = '';
+        if (isOwner) tag = ' ⭐ Моё';
+        else if (isDriver) tag = ' 👥 Совместный доступ';
+        opt.innerText = `${car.name} (${car.owner_name || car.ownerName || 'Владелец'})${tag}`;
         if (car.id === selectedCarId) opt.selected = true;
         select.appendChild(opt);
       });
@@ -479,7 +508,7 @@
       }
 
       const car = getSelectedCar();
-      const isOwner = String(car.owner_id || car.ownerId) === currentUserId;
+      const { isOwner, isDriver, canEdit } = checkCanEdit(car);
 
       document.getElementById('owner-name-label').innerText = car.owner_name || car.ownerName || 'Владелец';
       document.getElementById('form-car-name').innerText = car.name;
@@ -492,16 +521,24 @@
       if (isOwner) {
         badge.innerText = 'ВАШЕ АВТО';
         badge.className = 'bg-blue-50 text-blue-600 border border-blue-200 px-2.5 py-0.5 rounded-full text-[10px] font-bold';
-        formCard.classList.remove('hidden');
-        resetBtn.classList.remove('hidden');
-        notice.classList.add('hidden');
+      } else if (isDriver) {
+        badge.innerText = 'СО-ВОДИТЕЛЬ';
+        badge.className = 'bg-emerald-50 text-emerald-600 border border-emerald-200 px-2.5 py-0.5 rounded-full text-[10px] font-bold';
       } else {
         badge.innerText = 'ТОЛЬКО ПРОСМОТР';
         badge.className = 'bg-slate-100 text-slate-600 border border-slate-200 px-2.5 py-0.5 rounded-full text-[10px] font-bold';
+      }
+
+      if (canEdit) {
+        formCard.classList.remove('hidden');
+        notice.classList.add('hidden');
+      } else {
         formCard.classList.add('hidden');
-        resetBtn.classList.add('hidden');
         notice.classList.remove('hidden');
       }
+
+      if (isOwner) resetBtn.classList.remove('hidden');
+      else resetBtn.classList.add('hidden');
 
       renderPresetButtons();
       populateMonthSelect();
@@ -522,20 +559,25 @@
       const title = document.getElementById('modalTitle');
       const nameInput = document.getElementById('carNameInput');
       const capInput = document.getElementById('carCapInput');
+      const driversInput = document.getElementById('carDriversInput');
       const nightInput = document.getElementById('rateNightInput');
       const dayInput = document.getElementById('rateDayInput');
       const workInput = document.getElementById('rateWorkInput');
       const ezInput = document.getElementById('rateEzInput');
 
+      document.getElementById('my-tg-id-text').innerText = currentUserId;
+
       if (myCar) {
         title.innerText = '⚙️ Параметры и тарифы';
         nameInput.value = myCar.name || '';
         capInput.value = myCar.capacity || 18.7;
+        driversInput.value = (myCar.drivers || []).join(', ');
         const r = myCar.rates || { night: 2.8, day: 6.5, work: 0, ez: 19.0 };
         nightInput.value = r.night; dayInput.value = r.day; workInput.value = r.work; ezInput.value = r.ez;
       } else {
         title.innerText = '➕ Добавить свой автомобиль';
-        nameInput.value = ''; capInput.value = 18.7; nightInput.value = 2.8; dayInput.value = 6.5; workInput.value = 0; ezInput.value = 19.0;
+        nameInput.value = ''; capInput.value = 18.7; driversInput.value = '';
+        nightInput.value = 2.8; dayInput.value = 6.5; workInput.value = 0; ezInput.value = 19.0;
       }
       modal.classList.remove('hidden');
     }
@@ -545,6 +587,9 @@
     async function submitCarModal() {
       const name = document.getElementById('carNameInput').value.trim();
       const cap = parseFloat(document.getElementById('carCapInput').value);
+      const driversRaw = document.getElementById('carDriversInput').value;
+      const drivers = driversRaw.split(',').map(s => s.trim()).filter(s => s.length > 0);
+
       const night = parseFloat(document.getElementById('rateNightInput').value) || 0;
       const day = parseFloat(document.getElementById('rateDayInput').value) || 0;
       const work = parseFloat(document.getElementById('rateWorkInput').value) || 0;
@@ -559,12 +604,14 @@
       if (myCar) {
         myCar.name = name;
         myCar.capacity = cap;
+        myCar.drivers = drivers;
         myCar.rates = { night, day, work, ez };
       } else {
         myCar = {
           id: 'car_' + currentUserId,
           name: name,
           capacity: cap,
+          drivers: drivers,
           rates: { night, day, work, ez },
           owner_id: currentUserId,
           owner_name: currentUserName,
@@ -578,7 +625,7 @@
       updateCatalogUI();
       render();
       await syncCarToCloud(myCar);
-      notify(`✅ Автомобиль сохранен!`);
+      notify(`✅ Параметры и доступ сохранены!`);
     }
 
     function initChart() {
@@ -636,7 +683,7 @@
 
     function renderRecentLogs() {
       const car = getSelectedCar();
-      const isOwner = String(car.owner_id || car.ownerId) === currentUserId;
+      const { canEdit, isOwner } = checkCanEdit(car);
       const container = document.getElementById('recentLogsContainer');
       const logs = car.logs || [];
 
@@ -653,14 +700,15 @@
         const timeStr = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
         const cost = Math.round(item.totalPrice || item.price || 0);
         const loc = item.location || '⚡ Зарядка';
+        const driverName = item.author ? ` • 👤 ${item.author}` : '';
 
         return `
           <div class="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-xl text-xs">
             <div>
               <div class="font-bold text-slate-800">${loc} +${item.kwh} кВт⋅ч <span class="text-slate-400 font-normal">(${cost} ₽)</span></div>
-              <div class="text-[10px] text-slate-400">🛣️ Пробег: ${item.odo} км • ${dateStr}, ${timeStr}</div>
+              <div class="text-[10px] text-slate-400">🛣️ Пробег: ${item.odo} км • ${dateStr}, ${timeStr}${driverName}</div>
             </div>
-            ${isOwner ? `
+            ${canEdit ? `
               <button onclick="deleteLogEntry(${origIdx})" title="Удалить запись" class="text-rose-400 hover:text-rose-600 p-1.5 active:scale-90 transition">
                 🗑️
               </button>
@@ -724,8 +772,9 @@
 
     async function saveData() {
       const car = getSelectedCar();
-      if (String(car.owner_id || car.ownerId) !== currentUserId) {
-        notify('⛔ Вы не можете добавлять сессии в чужой профиль!');
+      const { canEdit } = checkCanEdit(car);
+      if (!canEdit) {
+        notify('⛔ У вас нет прав на добавление сессий в этот профиль!');
         return;
       }
 
@@ -752,6 +801,8 @@
         location: location,
         totalPrice: totalPrice,
         price: totalPrice,
+        author: currentUserName,
+        author_id: currentUserId,
         date: new Date().toISOString()
       });
 
@@ -856,8 +907,9 @@
 
     async function clearData() {
       const car = getSelectedCar();
-      if (String(car.owner_id || car.ownerId) !== currentUserId) {
-        notify('⛔ Чужой профиль нельзя сбросить!');
+      const { isOwner } = checkCanEdit(car);
+      if (!isOwner) {
+        notify('⛔ Только владелец может очистить журнал автомобиля!');
         return;
       }
       haptic('warning');
@@ -872,7 +924,7 @@
       }
     }
 
-    // Инициализация при загрузке
+    // Запуск
     initChart();
     updateCatalogUI();
     render();
