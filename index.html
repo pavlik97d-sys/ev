@@ -147,7 +147,7 @@
     </div>
   </div>
 
-  <!-- Форма записи с пресетами -->
+  <!-- Форма записи с пресетами тарифов -->
   <div id="chargeFormCard" class="card-clean rounded-2xl p-4 mb-3 space-y-2.5">
     <div class="text-xs font-bold uppercase tracking-wider text-blue-600">➕ Новая зарядная сессия</div>
     
@@ -156,22 +156,34 @@
       <input id="kwh" type="number" step="any" onfocus="haptic('light')" placeholder="Заряжено (кВт⋅ч)" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition">
     </div>
 
+    <!-- Быстрые пресеты: Добавлен пункт Работа -->
     <div class="flex gap-1.5 overflow-x-auto py-1">
-      <button onclick="applyPreset(2.8)" class="preset-chip px-2 py-1 rounded-lg text-[10px] font-bold text-slate-600 whitespace-nowrap">
+      <button onclick="applyPreset(2.8, '🏠 Ночь')" class="preset-chip px-2 py-1 rounded-lg text-[10px] font-bold text-slate-600 whitespace-nowrap">
         🏠 Ночь 2.8₽
       </button>
-      <button onclick="applyPreset(6.5)" class="preset-chip px-2 py-1 rounded-lg text-[10px] font-bold text-slate-600 whitespace-nowrap">
+      <button onclick="applyPreset(6.5, '🏠 День')" class="preset-chip px-2 py-1 rounded-lg text-[10px] font-bold text-slate-600 whitespace-nowrap">
         🏠 День 6.5₽
       </button>
-      <button onclick="applyPreset(19.0)" class="preset-chip px-2 py-1 rounded-lg text-[10px] font-bold text-slate-600 whitespace-nowrap">
+      <button onclick="applyPreset(0, '💼 Работа')" class="preset-chip px-2 py-1 rounded-lg text-[10px] font-bold text-blue-700 bg-blue-50/50 border-blue-200 whitespace-nowrap">
+        💼 Работа 0₽
+      </button>
+      <button onclick="applyPreset(19.0, '⚡ ЭЗС')" class="preset-chip px-2 py-1 rounded-lg text-[10px] font-bold text-slate-600 whitespace-nowrap">
         ⚡ ЭЗС 19₽
       </button>
-      <button onclick="applyPreset(0)" class="preset-chip px-2 py-1 rounded-lg text-[10px] font-bold text-emerald-600 whitespace-nowrap">
+      <button onclick="applyPreset(0, '🎁 Бесплатно')" class="preset-chip px-2 py-1 rounded-lg text-[10px] font-bold text-emerald-600 whitespace-nowrap">
         🎁 0₽
       </button>
     </div>
 
-    <input id="rate" type="number" step="any" onfocus="haptic('light')" placeholder="Тариф за 1 кВт⋅ч (₽)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition">
+    <div class="flex gap-2">
+      <input id="rate" type="number" step="any" onfocus="haptic('light')" placeholder="Тариф за 1 кВт⋅ч (₽)" class="flex-1 bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition">
+      <select id="locationSelect" class="bg-slate-50 border border-slate-200 rounded-xl px-2.5 text-xs font-bold text-slate-700 outline-none focus:border-blue-500">
+        <option value="🏠 Дом">🏠 Дом</option>
+        <option value="💼 Работа" selected>💼 Работа</option>
+        <option value="⚡ ЭЗС">⚡ ЭЗС</option>
+        <option value="🎁 Другое">🎁 Другое</option>
+      </select>
+    </div>
     
     <button onclick="saveData()" class="w-full accent-blue text-white hover:opacity-95 active:scale-[0.98] font-bold py-3 rounded-xl text-xs uppercase tracking-wider transition shadow-md shadow-blue-500/20">
       💾 Сохранить сессию
@@ -219,7 +231,7 @@
     </div>
   </div>
 
-  <!-- Модалка подробного отчета с кнопкой отправки в чат -->
+  <!-- Модалка подробного отчета -->
   <div id="reportModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
     <div class="bg-white w-full max-w-sm rounded-2xl p-4 shadow-2xl border border-slate-100 flex flex-col">
       <div class="flex justify-between items-center mb-2">
@@ -228,7 +240,6 @@
       </div>
       <div id="reportContent" class="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-xl p-3 mb-3 leading-relaxed"></div>
       
-      <!-- Кнопки действий -->
       <div class="space-y-2">
         <button onclick="sendReportToBot()" class="w-full accent-blue text-white py-2.5 rounded-xl text-xs font-bold active:scale-95 transition flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20">
           <span>📩</span> Отправить отчет в чат Telegram
@@ -237,7 +248,7 @@
           <button onclick="copyReportText()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2 rounded-xl text-xs font-bold">
             📋 Скопировать
           </button>
-          <button onclick="closeReportModal()" class="px-4 bg-slate-100 text-slate-600 py-2 rounded-xl text-xs font-bold">
+          <button onclick="closeReportModal()" class="px-4 bg-slate-100 text-slate-600 py-2.5 rounded-xl text-xs font-bold">
             Закрыть
           </button>
         </div>
@@ -302,9 +313,14 @@
       } catch(e){}
     }
 
-    function applyPreset(rateVal) {
+    function applyPreset(rateVal, label) {
       haptic('light');
       document.getElementById('rate').value = rateVal;
+      const locSelect = document.getElementById('locationSelect');
+      if (label.includes('Работа')) locSelect.value = '💼 Работа';
+      else if (label.includes('Ночь') || label.includes('День')) locSelect.value = '🏠 Дом';
+      else if (label.includes('ЭЗС')) locSelect.value = '⚡ ЭЗС';
+      else locSelect.value = '🎁 Другое';
     }
 
     function populateMonthSelect() {
@@ -544,11 +560,12 @@
         const dateStr = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
         const timeStr = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
         const cost = Math.round(item.totalPrice || item.price || 0);
+        const loc = item.location || '⚡ Зарядка';
 
         return `
           <div class="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-xl text-xs">
             <div>
-              <div class="font-bold text-slate-800">⚡ +${item.kwh} кВт⋅ч <span class="text-slate-400 font-normal">(${cost} ₽)</span></div>
+              <div class="font-bold text-slate-800">${loc} +${item.kwh} кВт⋅ч <span class="text-slate-400 font-normal">(${cost} ₽)</span></div>
               <div class="text-[10px] text-slate-400">🛣️ Пробег: ${item.odo} км • ${dateStr}, ${timeStr}</div>
             </div>
             ${isOwner ? `
@@ -626,6 +643,7 @@
       const odo = document.getElementById('odo').value;
       const kwh = document.getElementById('kwh').value;
       const rate = document.getElementById('rate').value || 0;
+      const location = document.getElementById('locationSelect').value || '⚡ Зарядка';
 
       if (!odo || !kwh) {
         haptic('warning');
@@ -641,6 +659,7 @@
         odo: parseFloat(odo),
         kwh: kwhVal,
         rate: rateVal,
+        location: location,
         totalPrice: totalPrice,
         price: totalPrice,
         date: new Date().toISOString()
@@ -655,7 +674,6 @@
       render();
     }
 
-    // Формирование текста отчета
     function generateReportPayload() {
       const car = getSelectedCar();
       const logs = getFilteredLogs();
@@ -694,7 +712,6 @@
 
     function closeReportModal() { document.getElementById('reportModal').classList.add('hidden'); }
 
-    // Отправка отчета в чат боту через Bot API
     function sendReportToBot() {
       haptic('success');
       const data = generateReportPayload();
@@ -717,7 +734,6 @@
         Telegram.WebApp.showAlert('✅ Отчет отправлен в чат боту!');
         closeReportModal();
       }).catch(() => {
-        // Запасной способ через буфер
         navigator.clipboard.writeText(data.reportText);
         Telegram.WebApp.showAlert('✅ Отчет скопирован в буфер обмена!');
         closeReportModal();
@@ -742,14 +758,15 @@
         return;
       }
 
-      let tableText = `Отчет (${currentFilter}): ${car.name} (Владелец: ${car.ownerName || 'Пользователь'})\nДата\tВремя\tТекущий пробег (км)\tЗаряжено (кВт⋅ч)\tТариф (₽/кВт⋅ч)\tИтого (₽)\n`;
+      let tableText = `Отчет (${currentFilter}): ${car.name} (Владелец: ${car.ownerName || 'Пользователь'})\nДата\tВремя\tЛокация\tТекущий пробег (км)\tЗаряжено (кВт⋅ч)\tТариф (₽/кВт⋅ч)\tИтого (₽)\n`;
       logs.forEach(item => {
         const d = new Date(item.date);
         const dateStr = d.toLocaleDateString('ru-RU');
         const timeStr = d.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'});
         const rateStr = item.rate !== undefined ? item.rate : '-';
+        const loc = item.location || '⚡ Зарядка';
         const total = item.totalPrice !== undefined ? item.totalPrice : (item.price || 0);
-        tableText += `${dateStr}\t${timeStr}\t${item.odo}\t${item.kwh}\t${rateStr}\t${total}\n`;
+        tableText += `${dateStr}\t${timeStr}\t${loc}\t${item.odo}\t${item.kwh}\t${rateStr}\t${total}\n`;
       });
 
       document.getElementById('exportText').value = tableText;
