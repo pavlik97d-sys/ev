@@ -7,7 +7,7 @@ import telebot
 from telebot import types
 
 TOKEN = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU'
-WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=13'
+WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=14'
 
 # Фоновый веб-сервер для удержания на Render
 class SimpleHandler(http.server.SimpleHTTPRequestHandler):
