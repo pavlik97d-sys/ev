@@ -147,7 +147,7 @@
     </div>
   </div>
 
-  <!-- Форма записи с пресетами тарифов -->
+  <!-- Форма записи с динамическими кнопками тарифов -->
   <div id="chargeFormCard" class="card-clean rounded-2xl p-4 mb-3 space-y-2.5">
     <div class="text-xs font-bold uppercase tracking-wider text-blue-600">➕ Новая зарядная сессия</div>
     
@@ -156,30 +156,16 @@
       <input id="kwh" type="number" step="any" onfocus="haptic('light')" placeholder="Заряжено (кВт⋅ч)" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition">
     </div>
 
-    <!-- Быстрые пресеты: Добавлен пункт Работа -->
-    <div class="flex gap-1.5 overflow-x-auto py-1">
-      <button onclick="applyPreset(2.8, '🏠 Ночь')" class="preset-chip px-2 py-1 rounded-lg text-[10px] font-bold text-slate-600 whitespace-nowrap">
-        🏠 Ночь 2.8₽
-      </button>
-      <button onclick="applyPreset(6.5, '🏠 День')" class="preset-chip px-2 py-1 rounded-lg text-[10px] font-bold text-slate-600 whitespace-nowrap">
-        🏠 День 6.5₽
-      </button>
-      <button onclick="applyPreset(0, '💼 Работа')" class="preset-chip px-2 py-1 rounded-lg text-[10px] font-bold text-blue-700 bg-blue-50/50 border-blue-200 whitespace-nowrap">
-        💼 Работа 0₽
-      </button>
-      <button onclick="applyPreset(19.0, '⚡ ЭЗС')" class="preset-chip px-2 py-1 rounded-lg text-[10px] font-bold text-slate-600 whitespace-nowrap">
-        ⚡ ЭЗС 19₽
-      </button>
-      <button onclick="applyPreset(0, '🎁 Бесплатно')" class="preset-chip px-2 py-1 rounded-lg text-[10px] font-bold text-emerald-600 whitespace-nowrap">
-        🎁 0₽
-      </button>
+    <!-- Кнопки пресетов, подгружающие персональные тарифы -->
+    <div id="presetsContainer" class="flex gap-1.5 overflow-x-auto py-1">
+      <!-- Генерируются автоматически из настроек авто -->
     </div>
 
     <div class="flex gap-2">
       <input id="rate" type="number" step="any" onfocus="haptic('light')" placeholder="Тариф за 1 кВт⋅ч (₽)" class="flex-1 bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition">
       <select id="locationSelect" class="bg-slate-50 border border-slate-200 rounded-xl px-2.5 text-xs font-bold text-slate-700 outline-none focus:border-blue-500">
         <option value="🏠 Дом">🏠 Дом</option>
-        <option value="💼 Работа" selected>💼 Работа</option>
+        <option value="💼 Работа">💼 Работа</option>
         <option value="⚡ ЭЗС">⚡ ЭЗС</option>
         <option value="🎁 Другое">🎁 Другое</option>
       </select>
@@ -215,23 +201,53 @@
     </button>
   </div>
 
-  <!-- Модалка авто -->
+  <!-- Модалка настроек авто и персональных тарифов -->
   <div id="carModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-white w-full max-w-sm rounded-2xl p-4 shadow-2xl border border-slate-100">
-      <h3 id="modalTitle" class="text-sm font-bold text-blue-600 mb-2">➕ Добавить свой автомобиль</h3>
-      <p class="text-[11px] text-slate-400 mb-2">Каждый пользователь может владеть одним профилем авто.</p>
-      <div class="space-y-2 mb-3">
-        <input id="carNameInput" type="text" placeholder="Модель (например, Geely EX5 EM-i)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs outline-none focus:border-blue-500">
-        <input id="carCapInput" type="number" step="any" placeholder="Емкость батареи (кВт⋅ч, например 18.7)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs outline-none focus:border-blue-500">
+    <div class="bg-white w-full max-w-sm rounded-2xl p-4 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
+      <h3 id="modalTitle" class="text-sm font-bold text-blue-600 mb-1">⚙️ Параметры и персональные тарифы</h3>
+      <p class="text-[11px] text-slate-400 mb-3">Задайте модель авто и свои стандартные цены за 1 кВт⋅ч.</p>
+      
+      <div class="space-y-2.5 mb-4">
+        <div>
+          <label class="text-[10px] font-bold text-slate-400 uppercase">Модель авто:</label>
+          <input id="carNameInput" type="text" placeholder="Например, Geely EX5 EM-i" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs outline-none focus:border-blue-500">
+        </div>
+        <div>
+          <label class="text-[10px] font-bold text-slate-400 uppercase">Емкость батареи (кВт⋅ч):</label>
+          <input id="carCapInput" type="number" step="any" placeholder="18.7" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs outline-none focus:border-blue-500">
+        </div>
+
+        <div class="border-t border-slate-100 pt-2">
+          <div class="text-[11px] font-bold text-slate-700 mb-2">⚡ Ваши тарифы по умолчанию (₽/кВт⋅ч):</div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-[10px] text-slate-400">🏠 Ночь (₽):</label>
+              <input id="rateNightInput" type="number" step="any" placeholder="2.8" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:border-blue-500">
+            </div>
+            <div>
+              <label class="text-[10px] text-slate-400">🏠 День (₽):</label>
+              <input id="rateDayInput" type="number" step="any" placeholder="6.5" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:border-blue-500">
+            </div>
+            <div>
+              <label class="text-[10px] text-slate-400">💼 Работа (₽):</label>
+              <input id="rateWorkInput" type="number" step="any" placeholder="0" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:border-blue-500">
+            </div>
+            <div>
+              <label class="text-[10px] text-slate-400">⚡ ЭЗС (₽):</label>
+              <input id="rateEzInput" type="number" step="any" placeholder="19.0" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:border-blue-500">
+            </div>
+          </div>
+        </div>
       </div>
+
       <div class="flex gap-2">
-        <button id="modalSubmitBtn" onclick="submitCarModal()" class="flex-1 accent-blue text-white py-2.5 rounded-xl text-xs font-bold active:scale-95 transition">Сохранить</button>
+        <button id="modalSubmitBtn" onclick="submitCarModal()" class="flex-1 accent-blue text-white py-2.5 rounded-xl text-xs font-bold active:scale-95 transition">💾 Сохранить</button>
         <button onclick="closeCarModal()" class="px-4 bg-slate-100 text-slate-600 py-2.5 rounded-xl text-xs font-bold">Отмена</button>
       </div>
     </div>
   </div>
 
-  <!-- Модалка подробного отчета -->
+  <!-- Модалка отчета -->
   <div id="reportModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
     <div class="bg-white w-full max-w-sm rounded-2xl p-4 shadow-2xl border border-slate-100 flex flex-col">
       <div class="flex justify-between items-center mb-2">
@@ -287,6 +303,7 @@
         id: 'car_' + currentUserId,
         name: 'Geely EX5 EM-i',
         capacity: 18.7,
+        rates: { night: 2.8, day: 6.5, work: 0, ez: 19.0 },
         ownerId: currentUserId,
         ownerName: currentUserName,
         logs: JSON.parse(localStorage.getItem('ev_logs') || '[]')
@@ -298,7 +315,12 @@
     if (!selectedCarId && allCars.length > 0) selectedCarId = allCars[0].id;
 
     function getUserCar() { return allCars.find(c => String(c.ownerId) === String(currentUserId)); }
-    function getSelectedCar() { return allCars.find(c => c.id === selectedCarId) || allCars[0]; }
+    function getSelectedCar() { 
+      const c = allCars.find(c => c.id === selectedCarId) || allCars[0];
+      if (!c.rates) c.rates = { night: 2.8, day: 6.5, work: 0, ez: 19.0 };
+      return c;
+    }
+
     function saveDataStore() {
       localStorage.setItem('ev_global_cars', JSON.stringify(allCars));
       localStorage.setItem('ev_active_car_id', selectedCarId);
@@ -321,6 +343,30 @@
       else if (label.includes('Ночь') || label.includes('День')) locSelect.value = '🏠 Дом';
       else if (label.includes('ЭЗС')) locSelect.value = '⚡ ЭЗС';
       else locSelect.value = '🎁 Другое';
+    }
+
+    function renderPresetButtons() {
+      const car = getSelectedCar();
+      const r = car.rates || { night: 2.8, day: 6.5, work: 0, ez: 19.0 };
+      const container = document.getElementById('presetsContainer');
+
+      container.innerHTML = `
+        <button onclick="applyPreset(${r.night}, '🏠 Ночь')" class="preset-chip px-2.5 py-1 rounded-lg text-[10px] font-bold text-slate-600 whitespace-nowrap">
+          🏠 Ночь ${r.night}₽
+        </button>
+        <button onclick="applyPreset(${r.day}, '🏠 День')" class="preset-chip px-2.5 py-1 rounded-lg text-[10px] font-bold text-slate-600 whitespace-nowrap">
+          🏠 День ${r.day}₽
+        </button>
+        <button onclick="applyPreset(${r.work}, '💼 Работа')" class="preset-chip px-2.5 py-1 rounded-lg text-[10px] font-bold text-blue-700 bg-blue-50/50 border-blue-200 whitespace-nowrap">
+          💼 Работа ${r.work}₽
+        </button>
+        <button onclick="applyPreset(${r.ez}, '⚡ ЭЗС')" class="preset-chip px-2.5 py-1 rounded-lg text-[10px] font-bold text-slate-600 whitespace-nowrap">
+          ⚡ ЭЗС ${r.ez}₽
+        </button>
+        <button onclick="applyPreset(0, '🎁 0₽')" class="preset-chip px-2.5 py-1 rounded-lg text-[10px] font-bold text-emerald-600 whitespace-nowrap">
+          🎁 0₽
+        </button>
+      `;
     }
 
     function populateMonthSelect() {
@@ -420,6 +466,7 @@
         notice.classList.remove('hidden');
       }
 
+      renderPresetButtons();
       populateMonthSelect();
     }
 
@@ -436,17 +483,31 @@
       const myCar = getUserCar();
       const modal = document.getElementById('carModal');
       const title = document.getElementById('modalTitle');
+      
       const nameInput = document.getElementById('carNameInput');
       const capInput = document.getElementById('carCapInput');
+      const nightInput = document.getElementById('rateNightInput');
+      const dayInput = document.getElementById('rateDayInput');
+      const workInput = document.getElementById('rateWorkInput');
+      const ezInput = document.getElementById('rateEzInput');
 
       if (myCar) {
-        title.innerText = '⚙️ Настройки вашего авто';
+        title.innerText = '⚙️ Параметры и персональные тарифы';
         nameInput.value = myCar.name;
         capInput.value = myCar.capacity;
+        const r = myCar.rates || { night: 2.8, day: 6.5, work: 0, ez: 19.0 };
+        nightInput.value = r.night;
+        dayInput.value = r.day;
+        workInput.value = r.work;
+        ezInput.value = r.ez;
       } else {
         title.innerText = '➕ Добавить свой автомобиль';
         nameInput.value = '';
         capInput.value = '';
+        nightInput.value = 2.8;
+        dayInput.value = 6.5;
+        workInput.value = 0;
+        ezInput.value = 19.0;
       }
       modal.classList.remove('hidden');
     }
@@ -456,6 +517,10 @@
     function submitCarModal() {
       const name = document.getElementById('carNameInput').value.trim();
       const cap = parseFloat(document.getElementById('carCapInput').value);
+      const night = parseFloat(document.getElementById('rateNightInput').value) || 0;
+      const day = parseFloat(document.getElementById('rateDayInput').value) || 0;
+      const work = parseFloat(document.getElementById('rateWorkInput').value) || 0;
+      const ez = parseFloat(document.getElementById('rateEzInput').value) || 0;
 
       if (!name || isNaN(cap) || cap <= 0) {
         Telegram.WebApp.showAlert('Заполните модель и емкость батареи!');
@@ -466,12 +531,14 @@
       if (myCar) {
         myCar.name = name;
         myCar.capacity = cap;
-        Telegram.WebApp.showAlert(`✅ Данные авто "${name}" обновлены!`);
+        myCar.rates = { night, day, work, ez };
+        Telegram.WebApp.showAlert(`✅ Настройки и тарифы сохранены!`);
       } else {
         myCar = {
           id: 'car_' + currentUserId,
           name: name,
           capacity: cap,
+          rates: { night, day, work, ez },
           ownerId: currentUserId,
           ownerName: currentUserName,
           logs: []
