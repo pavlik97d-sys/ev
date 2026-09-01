@@ -20,6 +20,7 @@ SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
 
 bot = telebot.TeleBot(TOKEN)
 
+# HTTP сервер для поддержания работы на Render
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -84,8 +85,9 @@ def analyze_photo_fast(image_bytes):
     b64_image = base64.b64encode(image_bytes).decode('utf-8')
     
     prompt = """
-    Изучи экран зарядной станции. Найдено: "Энергия [число]kwh". Выдели это число.
-    Верни строго JSON:
+    Изучи экран зарядной станции. 
+    Если написано 'Энергия [число]kwh' и 'Сумм. эн. [число]kwh' — выдели значение текущей сессии 'Энергия'.
+    Верни строго валидный JSON:
     {"odo": null, "kwh": 13.2, "location_type": "🏠 Дом"}
     """
 
@@ -108,23 +110,15 @@ def analyze_photo_fast(image_bytes):
     }
 
     try:
-        print("Отправка запроса в Gemini API...")
         response = requests.post(url, json=payload, timeout=12)
-        print(f"Ответ Gemini статус: {response.status_code}")
-        
         if response.ok:
             data = response.json()
             raw_text = data['candidates'][0]['content']['parts'][0]['text']
-            print(f"Сырой ответ нейросети: {raw_text}")
             return json.loads(clean_json_string(raw_text)), None
         else:
-            err_msg = f"Gemini error {response.status_code}: {response.text[:200]}"
-            print(err_msg)
-            return None, err_msg
+            return None, f"Ошибка Gemini {response.status_code}"
     except Exception as e:
-        err_msg = f"Gemini exception: {str(e)}"
-        print(err_msg)
-        return None, err_msg
+        return None, f"Ошибка сети: {str(e)}"
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
@@ -152,35 +146,38 @@ def handle_photo(message):
     user_id = message.from_user.id
     user_name = message.from_user.first_name or "Водитель"
     
-    print(f"Получено фото от пользователя {user_name} ({user_id})")
-    status_msg = bot.reply_to(message, "⚡ Считываю показатели с фото...", reply_markup=get_main_keyboard())
+    # Отправляем статус
+    status_msg = bot.reply_to(message, "⚡ Считываю показатели с фото...")
 
     try:
         photo_obj = message.photo[-2] if len(message.photo) > 1 else message.photo[-1]
         file_info = bot.get_file(photo_obj.file_id)
         file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_info.file_path}"
-        
-        print("Скачивание фото из Telegram...")
         img_res = requests.get(file_url, timeout=8)
         
         if not img_res.ok:
-            bot.edit_message_text("❌ Ошибка загрузки фото из Telegram.", message.chat.id, status_msg.message_id)
+            bot.send_message(message.chat.id, "❌ Не удалось скачать фото из Telegram.")
             return
 
-        print("Запуск анализа Gemini...")
         parsed, err = analyze_photo_fast(img_res.content)
 
+        # Удаляем временное сообщение "Считываю..."
+        try:
+            bot.delete_message(message.chat.id, status_msg.message_id)
+        except Exception:
+            pass
+
         if err:
-            bot.edit_message_text(f"⚠️ Ошибка Gemini: {err[:80]}", message.chat.id, status_msg.message_id)
+            bot.send_message(message.chat.id, f"⚠️ {err}")
             return
 
         if not parsed or (parsed.get('odo') is None and parsed.get('kwh') is None):
-            bot.edit_message_text("⚠️ Не удалось распознать цифры на экране.", message.chat.id, status_msg.message_id)
+            bot.send_message(message.chat.id, "⚠️ Не удалось распознать цифры на экране. Попробуйте сделать снимок ближе.")
             return
 
         car = find_user_car(user_id)
         if not car:
-            bot.edit_message_text("⚠️ Автомобиль не найден в базе Supabase.", message.chat.id, status_msg.message_id)
+            bot.send_message(message.chat.id, "⚠️ Автомобиль не найден в базе Supabase.")
             return
 
         logs = car.get('logs') or []
@@ -207,7 +204,6 @@ def handle_photo(message):
         logs.append(new_entry)
         car['logs'] = logs
 
-        print("Сохранение в Supabase...")
         if update_car_in_supabase(car):
             markup = types.InlineKeyboardMarkup()
             web_app = types.WebAppInfo(url=WEB_APP_URL)
@@ -223,14 +219,12 @@ def handle_photo(message):
                 f"🛣️ Пробег: {odo_val} км\n"
                 f"👤 Записал: {user_name}"
             )
-            bot.edit_message_text(text_res, message.chat.id, status_msg.message_id, reply_markup=markup)
-            print("Успешно сохранено и отправлено в чат!")
+            bot.send_message(message.chat.id, text_res, reply_markup=markup)
         else:
-            bot.edit_message_text("❌ Ошибка сохранения в Supabase.", message.chat.id, status_msg.message_id)
+            bot.send_message(message.chat.id, "❌ Ошибка сохранения в Supabase.")
 
     except Exception as e:
-        print(f"Критическая ошибка в handle_photo: {str(e)}")
-        bot.edit_message_text(f"⚠️ Ошибка: {str(e)[:80]}", message.chat.id, status_msg.message_id)
+        bot.send_message(message.chat.id, f"⚠️ Ошибка обработки: {str(e)}")
 
 if __name__ == '__main__':
     threading.Thread(target=run_http_server, daemon=True).start()
@@ -238,18 +232,15 @@ if __name__ == '__main__':
         bot.set_my_commands([types.BotCommand("start", "⚡ Меню / Пробудить бота")])
     except Exception:
         pass
-    print("Сервер запущен. Ожидание фото...")
+    print("Сервер запущен. Бот слушает Telegram...")
 
     while True:
         try:
             bot.polling(none_stop=True, interval=0, timeout=20, skip_pending=True)
         except ApiTelegramException as e:
             if e.error_code == 409:
-                print("Конфликт копий (409). Ожидание 5 сек...")
                 time.sleep(5)
             else:
-                print(f"Telegram API Exception: {e}")
                 time.sleep(3)
         except Exception as e:
-            print(f"Polling error: {e}")
             time.sleep(3)
