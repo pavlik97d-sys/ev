@@ -1,15 +1,17 @@
+import io
+import os
+import re
+import time
+import json
+import base64
+import threading
+from datetime import datetime
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+import requests
 import telebot
 from telebot import types
 from telebot.apihelper import ApiTelegramException
-import requests
-import json
-import base64
-import re
-import threading
-import os
-import time
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from datetime import datetime
 
 TOKEN = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU'
 WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=103'
@@ -26,6 +28,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.send_header('Content-type', 'text/plain')
         self.end_headers()
         self.wfile.write(b"OK")
+
     def log_message(self, format, *args):
         pass
 
@@ -73,29 +76,31 @@ def update_car_in_supabase(car):
         print(f"Update error: {e}")
         return False
 
-def clean_json_string(s):
-    s = re.sub(r'```json\s*', '', s)
-    s = re.sub(r'```\s*', '', s)
-    return s.strip()
+def extract_json_from_text(text):
+    text = re.sub(r'```json\s*', '', text)
+    text = re.sub(r'```\s*', '', text).strip()
+    match = re.search(r'\{.*\}', text, re.DOTALL)
+    if match:
+        return json.loads(match.group(0))
+    return json.loads(text)
 
 def analyze_photo_fast(image_bytes):
     b64_image = base64.b64encode(image_bytes).decode('utf-8')
     
-    prompt = """
-    Изучи экран зарядной станции. 
-    Если на дисплее написано 'Энергия [число]kwh' и 'Сумм. эн. [число]kwh' — выдели текущую сессию 'Энергия'.
-    Например: "Энергия 13.2kwh" -> верни 13.2.
-    Верни строго валидный JSON:
-    {"odo": null, "kwh": 13.2, "location_type": "🏠 Дом"}
-    """
+    prompt = (
+        "Распознай показатели с экрана зарядной станции для электромобиля. "
+        "Найди значение разовой сессии зарядки (поле 'Энергия' или 'kWh'). "
+        "Верни исключительно JSON в формате: "
+        "{\"odo\": null, \"kwh\": 13.2, \"location_type\": \"🏠 Дом\"}"
+    )
 
     payload = {
         "contents": [{
             "parts": [
                 {"text": prompt},
                 {
-                    "inline_data": {
-                        "mime_type": "image/jpeg",
+                    "inlineData": {
+                        "mimeType": "image/jpeg",
                         "data": b64_image
                     }
                 }
@@ -103,35 +108,42 @@ def analyze_photo_fast(image_bytes):
         }],
         "generationConfig": {
             "temperature": 0.1,
-            "maxOutputTokens": 80
+            "responseMimeType": "application/json"
         }
     }
 
-    endpoints = [
-        "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent",
-        "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent",
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    # Список моделей от самой быстрой/стабильной к запасным
+    candidate_models = [
+        ("v1beta", "gemini-1.5-flash-latest"),
+        ("v1beta", "gemini-1.5-flash"),
+        ("v1beta", "gemini-2.0-flash"),
+        ("v1beta", "gemini-1.5-pro-latest"),
+        ("v1", "gemini-1.5-flash")
     ]
 
     last_error = ""
-    for url in endpoints:
+    for api_ver, model_name in candidate_models:
+        url = f"https://generativelanguage.googleapis.com/{api_ver}/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
         try:
-            full_url = f"{url}?key={GEMINI_API_KEY}"
-            response = requests.post(full_url, json=payload, timeout=12)
+            response = requests.post(url, json=payload, timeout=12)
             if response.ok:
                 data = response.json()
                 raw_text = data['candidates'][0]['content']['parts'][0]['text']
-                return json.loads(clean_json_string(raw_text)), None
-            elif response.status_code in [503, 429]:
+                parsed = extract_json_from_text(raw_text)
+                return parsed, None
+            elif response.status_code == 404:
+                # Пробуем следующую модель
+                continue
+            elif response.status_code in [429, 503]:
                 time.sleep(1)
                 continue
             else:
-                last_error = f"({response.status_code}): {response.text[:120]}"
+                last_error = f"{model_name} ({response.status_code}): {response.text[:120]}"
         except Exception as e:
             last_error = str(e)
             time.sleep(0.5)
 
-    return None, f"Ошибка Gemini: {last_error}"
+    return None, f"Ошибка Gemini: {last_error or 'Все модели вернули 404'}"
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
