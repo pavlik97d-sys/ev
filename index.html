@@ -53,7 +53,7 @@
     </div>
   </div>
 
-  <!-- 2. Форма новой зарядки (НАВЕРХУ) -->
+  <!-- 2. Форма новой зарядки -->
   <div id="chargeFormCard" class="card-clean rounded-2xl p-4 space-y-3 border-blue-100 bg-gradient-to-b from-blue-50/30 to-white shadow-sm">
     <div class="flex items-center justify-between">
       <div class="text-xs font-bold uppercase tracking-wider text-blue-700 flex items-center gap-1.5">
@@ -278,34 +278,15 @@
     const SUPABASE_REST = 'https://smxvjnlbwiaoudwlbvud.supabase.co/rest/v1/ev_cars';
     const SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2';
 
-    const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user || { id: 'owner_main', first_name: 'Водитель' };
-    const currentUserId = String(tgUser.id || 'owner_main');
-    const currentUserName = tgUser.first_name || 'Водитель';
+    // Список доверенных ID (ваш новый и старый)
+    const TRUSTED_ADMIN_IDS = ['817508403', '413111884'];
 
-    function createDefaultCar() {
-      return {
-        id: 'car_' + currentUserId,
-        name: 'Geely EX5 EM-i',
-        capacity: 18.7,
-        rates: { night: 2.8, day: 6.5, work: 0, ez: 19.0 },
-        owner_id: currentUserId,
-        owner_name: currentUserName,
-        drivers: [],
-        logs: JSON.parse(localStorage.getItem('ev_logs') || '[]')
-      };
-    }
+    const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user || { id: '817508403', first_name: 'PavelfromSPb', username: 'PavelfromSPb' };
+    const currentUserId = String(tgUser.id || '817508403');
+    const currentUserName = tgUser.first_name || tgUser.username || 'Водитель';
 
     let allCars = [];
-    try {
-      allCars = JSON.parse(localStorage.getItem('ev_global_cars') || '[]');
-    } catch(e) { allCars = []; }
-
-    if (!Array.isArray(allCars) || allCars.length === 0) {
-      allCars = [createDefaultCar()];
-      localStorage.setItem('ev_global_cars', JSON.stringify(allCars));
-    }
-
-    let selectedCarId = localStorage.getItem('ev_active_car_id') || allCars[0].id;
+    let selectedCarId = localStorage.getItem('ev_active_car_id') || 'car_817508403';
     let selectedPresetKey = localStorage.getItem('ev_selected_preset_key') || null;
     let currentFilter = 'all';
     let chartMode = 'weekday';
@@ -337,20 +318,42 @@
     }
 
     function getUserCar() {
-      return allCars.find(c => String(c.owner_id || c.ownerId) === currentUserId);
+      return allCars.find(c => checkCanEdit(c).isOwner);
     }
 
     function getSelectedCar() {
       let c = allCars.find(c => c.id === selectedCarId);
-      if (!c) c = allCars[0] || createDefaultCar();
+      if (!c) c = allCars.find(c => c.name && c.name.includes('Geely')) || allCars[0] || {
+        id: 'car_817508403',
+        name: 'Geely EX5 EM-i',
+        capacity: 18.7,
+        rates: { night: 2.8, day: 6.5, work: 0, ez: 19.0 },
+        owner_id: currentUserId,
+        owner_name: currentUserName,
+        drivers: ['817508403', '413111884'],
+        logs: []
+      };
       if (!c.rates) c.rates = { night: 2.8, day: 6.5, work: 0, ez: 19.0 };
       if (!Array.isArray(c.drivers)) c.drivers = [];
       return c;
     }
 
     function checkCanEdit(car) {
-      const isOwner = String(car.owner_id || car.ownerId) === currentUserId;
-      const isDriver = Array.isArray(car.drivers) && car.drivers.map(String).includes(currentUserId);
+      const ownerIdStr = String(car.owner_id || car.ownerId || '');
+      const ownerNameStr = String(car.owner_name || car.ownerName || '');
+      
+      const isOwner = (
+        ownerIdStr === currentUserId ||
+        TRUSTED_ADMIN_IDS.includes(currentUserId) ||
+        ownerNameStr.toLowerCase().includes('pavel')
+      );
+
+      const driversList = (car.drivers || []).map(String);
+      const isDriver = (
+        driversList.includes(currentUserId) ||
+        driversList.some(d => TRUSTED_ADMIN_IDS.includes(d))
+      );
+
       return { isOwner, isDriver, canEdit: isOwner || isDriver };
     }
 
@@ -365,7 +368,13 @@
           const data = await res.json();
           if (Array.isArray(data) && data.length > 0) {
             allCars = data;
-            localStorage.setItem('ev_global_cars', JSON.stringify(allCars));
+            
+            // Если сохраненное авто не найдено, автоматически выбираем Geely
+            if (!allCars.some(c => c.id === selectedCarId)) {
+              const geely = allCars.find(c => c.name && c.name.includes('Geely'));
+              if (geely) selectedCarId = geely.id;
+            }
+            
             if (badge) badge.innerText = 'БД OK';
             updateCatalogUI();
             render();
@@ -377,9 +386,6 @@
     }
 
     async function syncCarToCloud(car) {
-      localStorage.setItem('ev_global_cars', JSON.stringify(allCars));
-      localStorage.setItem('ev_active_car_id', selectedCarId);
-
       const badge = document.getElementById('cloud-badge');
       if (badge) badge.innerText = 'СОХРАНЕНИЕ...';
 
@@ -388,9 +394,9 @@
         name: car.name,
         capacity: Number(car.capacity || 18.7),
         rates: car.rates,
-        owner_id: String(car.owner_id || car.ownerId),
-        owner_name: car.owner_name || car.ownerName,
-        drivers: car.drivers || [],
+        owner_id: String(car.owner_id || currentUserId),
+        owner_name: car.owner_name || currentUserName,
+        drivers: car.drivers || ['817508403', '413111884'],
         logs: car.logs || [],
         updated_at: new Date().toISOString()
       };
@@ -523,8 +529,6 @@
       const select = document.getElementById('carSelect');
       select.innerHTML = '';
 
-      if (allCars.length === 0) allCars = [createDefaultCar()];
-
       allCars.forEach(car => {
         const opt = document.createElement('option');
         opt.value = car.id;
@@ -595,7 +599,7 @@
 
     function handleCarAction() {
       haptic('medium');
-      const myCar = getUserCar();
+      const myCar = getUserCar() || getSelectedCar();
       const modal = document.getElementById('carModal');
       const title = document.getElementById('modalTitle');
       const nameInput = document.getElementById('carNameInput');
@@ -608,18 +612,13 @@
 
       document.getElementById('my-tg-id-text').innerText = currentUserId;
 
-      if (myCar) {
-        title.innerText = '⚙️ Параметры и тарифы';
-        nameInput.value = myCar.name || '';
-        capInput.value = myCar.capacity || 18.7;
-        driversInput.value = (myCar.drivers || []).join(', ');
-        const r = myCar.rates || { night: 2.8, day: 6.5, work: 0, ez: 19.0 };
-        nightInput.value = r.night; dayInput.value = r.day; workInput.value = r.work; ezInput.value = r.ez;
-      } else {
-        title.innerText = '➕ Добавить свой автомобиль';
-        nameInput.value = ''; capInput.value = 18.7; driversInput.value = '';
-        nightInput.value = 2.8; dayInput.value = 6.5; workInput.value = 0; ezInput.value = 19.0;
-      }
+      title.innerText = '⚙️ Параметры и тарифы';
+      nameInput.value = myCar.name || '';
+      capInput.value = myCar.capacity || 18.7;
+      driversInput.value = (myCar.drivers || []).join(', ');
+      const r = myCar.rates || { night: 2.8, day: 6.5, work: 0, ez: 19.0 };
+      nightInput.value = r.night; dayInput.value = r.day; workInput.value = r.work; ezInput.value = r.ez;
+      
       modal.classList.remove('hidden');
     }
 
@@ -641,32 +640,17 @@
         return;
       }
 
-      let myCar = getUserCar();
-      if (myCar) {
-        myCar.name = name;
-        myCar.capacity = cap;
-        myCar.drivers = drivers;
-        myCar.rates = { night, day, work, ez };
-      } else {
-        myCar = {
-          id: 'car_' + currentUserId,
-          name: name,
-          capacity: cap,
-          drivers: drivers,
-          rates: { night, day, work, ez },
-          owner_id: currentUserId,
-          owner_name: currentUserName,
-          logs: []
-        };
-        allCars.push(myCar);
-        selectedCarId = myCar.id;
-      }
+      let myCar = getSelectedCar();
+      myCar.name = name;
+      myCar.capacity = cap;
+      myCar.drivers = drivers;
+      myCar.rates = { night, day, work, ez };
 
       closeCarModal();
       updateCatalogUI();
       render();
       await syncCarToCloud(myCar);
-      notify(`✅ Параметры и доступ сохранены!`);
+      notify(`✅ Параметры сохранены!`);
     }
 
     function initChart() {
@@ -724,7 +708,7 @@
 
     function renderRecentLogs() {
       const car = getSelectedCar();
-      const { canEdit, isOwner } = checkCanEdit(car);
+      const { canEdit } = checkCanEdit(car);
       const container = document.getElementById('recentLogsContainer');
       const logs = car.logs || [];
 
@@ -834,7 +818,6 @@
       const rateVal = parseFloat(rate);
       const totalPrice = parseFloat((kwhVal * rateVal).toFixed(2));
 
-      // Сохраняем тариф для следующего раза
       localStorage.setItem('ev_last_rate', rateVal);
 
       if (!car.logs) car.logs = [];
