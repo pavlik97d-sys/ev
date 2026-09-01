@@ -19,7 +19,7 @@ SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
 
 bot = telebot.TeleBot(TOKEN)
 
-# Простой HTTP-сервер, чтобы Render успешно завершал Deploy
+# Простой HTTP-сервер для поддержки активности Render
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -83,35 +83,41 @@ def analyze_photo_with_gemini(image_bytes):
     b64_image = base64.b64encode(image_bytes).decode('utf-8')
     
     prompt = """
-    Ты эксперт по электромобилям и зарядным станциям.
-    Внимательно изучи экран (это дисплей зарядной станции Wallbox/Energy Charger, экран ЭЗС или приборная панель авто).
-    
-    Найди параметры:
-    1. "kwh": Заряженная энергия (kWh / кВт⋅ч / Энергия). Например: если написано "Энергия 11.7kwh", верни 11.7. Если нет, верни null.
-    2. "odo": Общий пробег авто (только если это приборка). Если нет, верни null.
-    3. "location_type": Если домашняя зарядка — "🏠 Дом", если публичная — "⚡ ЭЗС".
+    Внимательно изучи изображение (экран зарядной станции, приборная панель авто или чек).
+    Найди следующие данные:
+    1. "kwh": Заряженная энергия в кВт⋅ч (kWh, Энергия). Например, если написано "11.7kwh", верни 11.7. Если нет, верни null.
+    2. "odo": Пробег авто в километрах. Если нет, верни null.
+    3. "location_type": "🏠 Дом" (если домашняя зарядка/Wallbox) или "⚡ ЭЗС" (если публичная станция).
 
-    Верни ТОЛЬКО валидный JSON:
+    Верни ТОЛЬКО JSON:
     {"odo": null, "kwh": 11.7, "location_type": "🏠 Дом"}
     """
 
+    # Важно: inlineData (в camelCase для Gemini API)
     payload = {
         "contents": [{
             "parts": [
                 {"text": prompt},
-                {"inline_data": {"mime_type": "image/jpeg", "data": b64_image}}
+                {
+                    "inlineData": {
+                        "mimeType": "image/jpeg",
+                        "data": b64_image
+                    }
+                }
             ]
         }]
     }
 
     try:
-        response = requests.post(url, json=payload, timeout=20)
+        response = requests.post(url, json=payload, timeout=25)
         if response.ok:
             data = response.json()
             raw_text = data['candidates'][0]['content']['parts'][0]['text']
             return json.loads(clean_json_string(raw_text))
+        else:
+            print(f"Gemini API Error: {response.status_code} {response.text}")
     except Exception as e:
-        print(f"Ошибка парсинга Gemini: {e}")
+        print(f"Gemini Exception: {e}")
     return None
 
 @bot.message_handler(commands=['start'])
@@ -124,8 +130,8 @@ def start_handler(message):
     bot.send_message(
         message.chat.id,
         "👋 Привет! Добро пожаловать в **EV Garage**.\n\n"
-        "📸 **Отчет по фото:** Отправьте фотографию экрана зарядки или приборной панели — бот автоматически считает показатели!\n\n"
-        "Открыть панель аналитики:",
+        "📸 **Отчет по фото:** Просто отправьте фотографию экрана зарядки или приборной панели — бот автоматически распознает показатели!\n\n"
+        "Или откройте гараж кнопкой ниже:",
         reply_markup=markup,
         parse_mode="Markdown"
     )
@@ -135,7 +141,7 @@ def handle_photo(message):
     user_id = message.from_user.id
     user_name = message.from_user.first_name or "Водитель"
     
-    status_msg = bot.reply_to(message, "🔍 Считываю показатели с экрана зарядки...")
+    status_msg = bot.reply_to(message, "🔍 Считываю показатели с фото...")
 
     try:
         file_info = bot.get_file(message.photo[-1].file_id)
@@ -151,7 +157,7 @@ def handle_photo(message):
         if not parsed or (parsed.get('odo') is None and parsed.get('kwh') is None):
             bot.edit_message_text(
                 "⚠️ Не удалось четко распознать кВт⋅ч на фото.\n"
-                "Сделайте снимок ближе или внесите данные через WebApp.",
+                "Сделайте снимок экрана чуть ближе или внесите данные через WebApp.",
                 message.chat.id,
                 status_msg.message_id
             )
@@ -159,7 +165,7 @@ def handle_photo(message):
 
         car = find_user_car(user_id)
         if not car:
-            bot.edit_message_text("⚠️ Автомобиль не найден.", message.chat.id, status_msg.message_id)
+            bot.edit_message_text("⚠️ Автомобиль не найден. Откройте WebApp и сохраните авто.", message.chat.id, status_msg.message_id)
             return
 
         logs = car.get('logs') or []
@@ -205,7 +211,7 @@ def handle_photo(message):
                 parse_mode="Markdown"
             )
         else:
-            bot.edit_message_text("❌ Ошибка сохранения в базу.", message.chat.id, status_msg.message_id)
+            bot.edit_message_text("❌ Ошибка сохранения в базу Supabase.", message.chat.id, status_msg.message_id)
 
     except Exception as e:
         bot.edit_message_text(f"⚠️ Ошибка: {e}", message.chat.id, status_msg.message_id)
