@@ -11,19 +11,15 @@ import requests
 import telebot
 from telebot import types
 from telebot.apihelper import ApiTelegramException
-from google import genai
-from google.genai import types as genai_types
-from PIL import Image
 
 TOKEN = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU'
 WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=103'
-GEMINI_API_KEY = 'AQ.Ab8RN6JGe-nvQvLfMq6VeBYXYsD8tiAhCfguWq2W_0iymrlZeg'
+OCR_API_KEY = 'K81090819088957'
 
 SUPABASE_REST = 'https://smxvjnlbwiaoudwlbvud.supabase.co/rest/v1/ev_cars'
 SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
 
 bot = telebot.TeleBot(TOKEN)
-client = genai.Client(api_key=GEMINI_API_KEY)
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -79,49 +75,54 @@ def update_car_in_supabase(car):
         print(f"Update error: {e}")
         return False
 
-def extract_json_from_text(text):
-    text = re.sub(r'```json\s*', '', text)
-    text = re.sub(r'```\s*', '', text).strip()
-    match = re.search(r'\{.*\}', text, re.DOTALL)
-    if match:
-        return json.loads(match.group(0))
-    return json.loads(text)
-
-def analyze_photo_fast(image_bytes):
-    image = Image.open(io.BytesIO(image_bytes))
+def parse_charging_screen(text):
+    clean_text = text.replace(',', '.')
     
-    prompt = (
-        "Распознай показатели с дисплея зарядной станции для электромобиля. "
-        "Найди значение текущей разовой сессии зарядки (поле 'Энергия' или 'kWh'). "
-        "Например: 'Энергия 13.2kwh' -> 13.2. "
-        "Верни строго валидный JSON: "
-        "{\"odo\": null, \"kwh\": 13.2, \"location_type\": \"🏠 Дом\"}"
-    )
+    # 1. Поиск блока разовой сессии: Энергия XX.X kwh
+    energy_match = re.search(r'(?:энергия|energy)[\s:]*([0-9]+(?:\.[0-9]+)?)\s*(?:kwh|квт)?', clean_text, re.IGNORECASE)
+    if energy_match:
+        return float(energy_match.group(1))
 
-    models_to_try = [
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash"
-    ]
+    # 2. Поиск любого числа перед kwh/квт
+    kwh_match = re.findall(r'([0-9]+(?:\.[0-9]+)?)\s*(?:kwh|квт)', clean_text, re.IGNORECASE)
+    if kwh_match:
+        return float(kwh_match[0])
 
-    last_error = ""
-    for model_name in models_to_try:
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=[prompt, image],
-                config=genai_types.GenerateContentConfig(
-                    temperature=0.1,
-                    response_mime_type="application/json"
-                )
-            )
-            if response.text:
-                return extract_json_from_text(response.text), None
-        except Exception as e:
-            last_error = str(e)
-            time.sleep(0.5)
+    return None
 
-    return None, f"Ошибка распознавания: {last_error}"
+def analyze_photo_with_ocr(image_bytes):
+    try:
+        url = 'https://api.ocr.space/parse/image'
+        files = {'file': ('screen.jpg', image_bytes, 'image/jpeg')}
+        payload = {
+            'apikey': OCR_API_KEY,
+            'language': 'rus',
+            'isOverlayRequired': False,
+            'detectOrientation': True,
+            'scale': True,
+            'OCREngine': 2
+        }
+        response = requests.post(url, files=files, data=payload, timeout=15)
+        if response.ok:
+            result = response.json()
+            if result.get('IsErroredOnProcessing'):
+                return None, f"Ошибка OCR: {result.get('ErrorMessage')}"
+            
+            parsed_results = result.get('ParsedResults', [])
+            if not parsed_results:
+                return None, "Не удалось прочитать текст на фото"
+            
+            full_text = parsed_results[0].get('ParsedText', '')
+            kwh = parse_charging_screen(full_text)
+            
+            if kwh is not None:
+                return {"odo": None, "kwh": kwh, "location_type": "🏠 Дом"}, None
+            else:
+                return None, "Цифры зарядки (кВт⋅ч) не обнаружены на дисплее"
+        else:
+            return None, f"Ошибка сервера OCR: {response.status_code}"
+    except Exception as e:
+        return None, f"Ошибка сервиса: {str(e)}"
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
@@ -161,7 +162,7 @@ def handle_photo(message):
             bot.send_message(message.chat.id, "❌ Не удалось скачать фото из Telegram.")
             return
 
-        parsed, err = analyze_photo_fast(img_res.content)
+        parsed, err = analyze_photo_with_ocr(img_res.content)
 
         try:
             bot.delete_message(message.chat.id, status_msg.message_id)
@@ -172,8 +173,8 @@ def handle_photo(message):
             bot.send_message(message.chat.id, f"⚠️ {err}")
             return
 
-        if not parsed or (parsed.get('odo') is None and parsed.get('kwh') is None):
-            bot.send_message(message.chat.id, "⚠️ Не удалось распознать цифры на экране. Попробуйте сделать снимок ближе.")
+        if not parsed or parsed.get('kwh') is None:
+            bot.send_message(message.chat.id, "⚠️ Не удалось распознать кВт⋅ч на экране. Попробуйте сфотографировать дисплей ближе.")
             return
 
         car = find_user_car(user_id)
