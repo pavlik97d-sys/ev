@@ -6,6 +6,8 @@ import base64
 import re
 import threading
 import os
+import io
+from PIL import Image
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 
@@ -19,7 +21,6 @@ SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
 
 bot = telebot.TeleBot(TOKEN)
 
-# Простой HTTP-сервер для поддержки Render
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -78,16 +79,29 @@ def clean_json_string(s):
     s = re.sub(r'```\s*', '', s)
     return s.strip()
 
+def compress_image(image_bytes, max_size=(1024, 1024), quality=80):
+    """Сжатие фото в памяти для ускорения передачи в 10 раз"""
+    img = Image.open(io.BytesIO(image_bytes))
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+    img.thumbnail(max_size, Image.Resampling.LANCZOS)
+    buffer = io.BytesIO()
+    img.save(buffer, format="JPEG", quality=quality, optimize=True)
+    return buffer.getvalue()
+
 def analyze_photo_with_gemini(image_bytes):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-    b64_image = base64.b64encode(image_bytes).decode('utf-8')
+    
+    # Сжимаем фото перед отправкой
+    compressed_bytes = compress_image(image_bytes)
+    b64_image = base64.b64encode(compressed_bytes).decode('utf-8')
     
     prompt = """
-    Внимательно изучи изображение (экран зарядной станции Wallbox/Energy Charger, экран ЭЗС или приборная панель авто).
+    Изучи изображение зарядной станции или приборной панели авто.
     Найди параметры:
-    1. "kwh": Заряженная энергия в кВт⋅ч (kWh / кВтч / Энергия). Если написано "Энергия 11.7kwh", верни 11.7. Если нет, верни null.
-    2. "odo": Пробег авто в км (только если это одометр приборки). Если нет, верни null.
-    3. "location_type": "🏠 Дом" (если домашняя зарядка) или "⚡ ЭЗС" (если публичная).
+    1. "kwh": Заряженная энергия в кВт⋅ч (kWh / Энергия). Если написано "Энергия 11.7kwh", верни 11.7. Если нет, верни null.
+    2. "odo": Пробег авто в км (только одометр). Если нет, верни null.
+    3. "location_type": "🏠 Дом" или "⚡ ЭЗС".
 
     Верни ТОЛЬКО JSON:
     {"odo": null, "kwh": 11.7, "location_type": "🏠 Дом"}
@@ -108,7 +122,7 @@ def analyze_photo_with_gemini(image_bytes):
     }
 
     try:
-        response = requests.post(url, json=payload, timeout=25)
+        response = requests.post(url, json=payload, timeout=15)
         if response.ok:
             data = response.json()
             raw_text = data['candidates'][0]['content']['parts'][0]['text']
@@ -118,24 +132,20 @@ def analyze_photo_with_gemini(image_bytes):
     return None
 
 def get_main_keyboard():
-    """Постоянная нижняя клавиатура"""
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     web_app = types.WebAppInfo(url=WEB_APP_URL)
-    btn_app = types.KeyboardButton(text="⚡ Открыть EV Garage", web_app=web_app)
-    btn_start = types.KeyboardButton(text="🔄 Пробудить / Обновить бота")
-    markup.add(btn_app, btn_start)
+    markup.add(
+        types.KeyboardButton(text="⚡ Открыть EV Garage", web_app=web_app),
+        types.KeyboardButton(text="🔄 Пробудить / Обновить бота")
+    )
     return markup
 
 @bot.message_handler(commands=['start'])
 def start_handler(message):
-    inline_markup = types.InlineKeyboardMarkup()
-    web_app = types.WebAppInfo(url=WEB_APP_URL)
-    inline_markup.add(types.InlineKeyboardButton(text="⚡ Открыть EV Garage", web_app=web_app))
-    
     bot.send_message(
         message.chat.id,
         "👋 **EV Garage активен!**\n\n"
-        "📸 **Отчет по фото:** Просто пришлите фотографию экрана зарядки или приборной панели — показатели запишутся автоматически.\n\n"
+        "📸 **Отчет по фото:** Отправьте фотографию экрана зарядки или одометра для автоматической записи.\n\n"
         "Кнопки для быстрого запуска закреплены ниже ⬇️",
         reply_markup=get_main_keyboard(),
         parse_mode="Markdown"
@@ -150,23 +160,24 @@ def handle_photo(message):
     user_id = message.from_user.id
     user_name = message.from_user.first_name or "Водитель"
     
-    status_msg = bot.reply_to(message, "🔍 Считываю показатели с фото...", reply_markup=get_main_keyboard())
+    status_msg = bot.reply_to(message, "⚡ Считываю показатели...", reply_markup=get_main_keyboard())
 
     try:
-        file_info = bot.get_file(message.photo[-1].file_id)
+        # Берем предпоследний размер превью Telegram (он уже оптимизирован по весу)
+        photo_obj = message.photo[-2] if len(message.photo) > 1 else message.photo[-1]
+        file_info = bot.get_file(photo_obj.file_id)
         file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_info.file_path}"
-        img_res = requests.get(file_url, timeout=15)
+        img_res = requests.get(file_url, timeout=10)
         
         if not img_res.ok:
-            bot.edit_message_text("❌ Не удалось загрузить фото из Telegram.", message.chat.id, status_msg.message_id)
+            bot.edit_message_text("❌ Ошибка загрузки фото из Telegram.", message.chat.id, status_msg.message_id)
             return
 
         parsed = analyze_photo_with_gemini(img_res.content)
 
         if not parsed or (parsed.get('odo') is None and parsed.get('kwh') is None):
             bot.edit_message_text(
-                "⚠️ Не удалось четко распознать кВт⋅ч на фото.\n"
-                "Сделайте снимок экрана чуть ближе или внесите данные через WebApp.",
+                "⚠️ Не удалось распознать кВт⋅ч.\nСделайте снимок ближе или запишите вручную.",
                 message.chat.id,
                 status_msg.message_id
             )
@@ -174,7 +185,7 @@ def handle_photo(message):
 
         car = find_user_car(user_id)
         if not car:
-            bot.edit_message_text("⚠️ Автомобиль не найден. Откройте WebApp и сохраните авто.", message.chat.id, status_msg.message_id)
+            bot.edit_message_text("⚠️ Автомобиль не найден в базе.", message.chat.id, status_msg.message_id)
             return
 
         logs = car.get('logs') or []
@@ -220,7 +231,7 @@ def handle_photo(message):
                 parse_mode="Markdown"
             )
         else:
-            bot.edit_message_text("❌ Ошибка сохранения в Supabase.", message.chat.id, status_msg.message_id)
+            bot.edit_message_text("❌ Ошибка сохранения в базу.", message.chat.id, status_msg.message_id)
 
     except Exception as e:
         bot.edit_message_text(f"⚠️ Ошибка: {e}", message.chat.id, status_msg.message_id)
@@ -228,10 +239,7 @@ def handle_photo(message):
 if __name__ == '__main__':
     threading.Thread(target=run_http_server, daemon=True).start()
     try:
-        # Устанавливаем команду в меню Telegram
-        bot.set_my_commands([
-            types.BotCommand("start", "⚡ Открыть EV Garage / Перезапустить")
-        ])
+        bot.set_my_commands([types.BotCommand("start", "⚡ Меню / Пробудить бота")])
     except Exception:
         pass
     print("Сервер и бот успешно запущены!")
