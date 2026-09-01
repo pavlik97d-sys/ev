@@ -9,11 +9,8 @@ import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 
-# --- КОНФИГУРАЦИЯ ---
 TOKEN = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU'
 WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=103'
-
-# Новый ключ Gemini API
 GEMINI_API_KEY = 'AQ.Ab8RN6LinRobg8SGVdSmr8-jUlPKgmr2Ji-rGZtdsL8piq4WYQ'
 
 SUPABASE_REST = 'https://smxvjnlbwiaoudwlbvud.supabase.co/rest/v1/ev_cars'
@@ -21,7 +18,6 @@ SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
 
 bot = telebot.TeleBot(TOKEN)
 
-# HTTP сервер для активности Render
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -59,7 +55,7 @@ def find_user_car(user_id):
             if cars:
                 return cars[0]
     except Exception as e:
-        print(f"Ошибка Supabase: {e}")
+        print(f"Supabase error: {e}")
     return None
 
 def update_car_in_supabase(car):
@@ -72,9 +68,162 @@ def update_car_in_supabase(car):
         res = requests.patch(url, headers=get_supabase_headers(), json=payload, timeout=5)
         return res.ok
     except Exception as e:
-        print(f"Ошибка сохранения: {e}")
+        print(f"Update error: {e}")
         return False
 
 def clean_json_string(s):
     s = re.sub(r'```json\s*', '', s)
-    s = re.sub(r'
+    s = re.sub(r'```\s*', '', s)
+    return s.strip()
+
+def analyze_photo_fast(image_bytes):
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY
+    }
+    b64_image = base64.b64encode(image_bytes).decode('utf-8')
+    
+    prompt = 'Изучи экран зарядной станции или одометр авто. Найди kwh текущей сессии (число, например 12.0), odo пробег (число) и location_type ("🏠 Дом" или "⚡ ЭЗС"). Ответь ТОЛЬКО JSON объектом: {"odo": null, "kwh": 12.0, "location_type": "🏠 Дом"}'
+
+    payload = {
+        "contents": [{
+            "parts": [
+                {"text": prompt},
+                {
+                    "inlineData": {
+                        "mimeType": "image/jpeg",
+                        "data": b64_image
+                    }
+                }
+            ]
+        }],
+        "generationConfig": {
+            "temperature": 0.1,
+            "maxOutputTokens": 80
+        }
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        if response.ok:
+            data = response.json()
+            raw_text = data['candidates'][0]['content']['parts'][0]['text']
+            return json.loads(clean_json_string(raw_text))
+        else:
+            print(f"Gemini API Error {response.status_code}: {response.text}")
+    except Exception as e:
+        print(f"Gemini exception: {e}")
+    return None
+
+def get_main_keyboard():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+    web_app = types.WebAppInfo(url=WEB_APP_URL)
+    markup.add(
+        types.KeyboardButton(text="⚡ Открыть EV Garage", web_app=web_app),
+        types.KeyboardButton(text="🔄 Пробудить / Обновить бота")
+    )
+    return markup
+
+@bot.message_handler(commands=['start'])
+def start_handler(message):
+    bot.send_message(
+        message.chat.id,
+        "👋 **EV Garage активен!**\n\n📸 Отправьте фотографию экрана зарядки или одометра для автоматической записи.",
+        reply_markup=get_main_keyboard(),
+        parse_mode="Markdown"
+    )
+
+@bot.message_handler(func=lambda msg: msg.text == "🔄 Пробудить / Обновить бота")
+def wake_up_handler(message):
+    start_handler(message)
+
+@bot.message_handler(content_types=['photo'])
+def handle_photo(message):
+    user_id = message.from_user.id
+    user_name = message.from_user.first_name or "Водитель"
+    
+    status_msg = bot.reply_to(message, "⚡ Считываю показатели с фото...", reply_markup=get_main_keyboard())
+
+    try:
+        photo_obj = message.photo[-2] if len(message.photo) > 1 else message.photo[-1]
+        file_info = bot.get_file(photo_obj.file_id)
+        file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_info.file_path}"
+        img_res = requests.get(file_url, timeout=8)
+        
+        if not img_res.ok:
+            bot.edit_message_text("❌ Ошибка загрузки фото из Telegram.", message.chat.id, status_msg.message_id)
+            return
+
+        parsed = analyze_photo_fast(img_res.content)
+
+        if not parsed or (parsed.get('odo') is None and parsed.get('kwh') is None):
+            bot.edit_message_text(
+                "⚠️ Не удалось распознать кВт⋅ч на фото.\nСделайте снимок ближе или запишите вручную.",
+                message.chat.id,
+                status_msg.message_id
+            )
+            return
+
+        car = find_user_car(user_id)
+        if not car:
+            bot.edit_message_text("⚠️ Автомобиль не найден в базе.", message.chat.id, status_msg.message_id)
+            return
+
+        logs = car.get('logs') or []
+        odo_val = parsed.get('odo') or (logs[-1].get('odo', 0) if logs else 0)
+        kwh_val = parsed.get('kwh') or 0.0
+        loc_val = parsed.get('location_type') or '🏠 Дом'
+        
+        rates = car.get('rates') or {'night': 2.8, 'day': 6.5, 'work': 0, 'ez': 19.0}
+        rate_val = rates.get('night', 2.8) if 'Дом' in loc_val else (rates.get('work', 0.0) if 'Работа' in loc_val else rates.get('ez', 19.0))
+        total_price = round(float(kwh_val) * float(rate_val), 2)
+
+        new_entry = {
+            'id': str(int(datetime.utcnow().timestamp() * 1000)),
+            'odo': float(odo_val),
+            'kwh': float(kwh_val),
+            'rate': float(rate_val),
+            'location': loc_val,
+            'totalPrice': total_price,
+            'price': total_price,
+            'author': user_name,
+            'author_id': str(user_id),
+            'date': datetime.utcnow().isoformat()
+        }
+        logs.append(new_entry)
+        car['logs'] = logs
+
+        if update_car_in_supabase(car):
+            markup = types.InlineKeyboardMarkup()
+            web_app = types.WebAppInfo(url=WEB_APP_URL)
+            btn = types.InlineKeyboardButton(text="📊 Открыть EV Garage", web_app=web_app)
+            markup.add(btn)
+
+            bot.edit_message_text(
+                f"✅ **Сессия сохранена по фото!**\n\n"
+                f"🚗 **Авто:** {car.get('name')}\n"
+                f"🔋 **Заряжено:** +{kwh_val} кВт⋅ч\n"
+                f"📍 **Локация:** {loc_val} ({rate_val} ₽/кВт⋅ч)\n"
+                f"💰 **Стоимость:** {total_price} ₽\n"
+                f"🛣️ **Пробег:** {odo_val} км\n"
+                f"👤 **Записал:** {user_name}",
+                message.chat.id,
+                status_msg.message_id,
+                reply_markup=markup,
+                parse_mode="Markdown"
+            )
+        else:
+            bot.edit_message_text("❌ Ошибка сохранения в Supabase.", message.chat.id, status_msg.message_id)
+
+    except Exception as e:
+        bot.edit_message_text(f"⚠️ Ошибка: {e}", message.chat.id, status_msg.message_id)
+
+if __name__ == '__main__':
+    threading.Thread(target=run_http_server, daemon=True).start()
+    try:
+        bot.set_my_commands([types.BotCommand("start", "⚡ Меню / Пробудить бота")])
+    except Exception:
+        pass
+    print("Сервер и бот успешно запущены!")
+    bot.infinity_polling(timeout=10, long_polling_timeout=5)
