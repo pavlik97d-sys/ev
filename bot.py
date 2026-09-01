@@ -3,7 +3,6 @@ import os
 import re
 import time
 import json
-import base64
 import threading
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -12,15 +11,19 @@ import requests
 import telebot
 from telebot import types
 from telebot.apihelper import ApiTelegramException
+from google import genai
+from google.genai import types as genai_types
+from PIL import Image
 
 TOKEN = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU'
 WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=103'
-GEMINI_API_KEY = 'AIzaSyBuuDOecQ1TBmC2VhCDgxICSYjlGoqraz8'
+GEMINI_API_KEY = 'AQ.Ab8RN6JGe-nvQvLfMq6VeBYXYsD8tiAhCfguWq2W_0iymrlZeg'
 
 SUPABASE_REST = 'https://smxvjnlbwiaoudwlbvud.supabase.co/rest/v1/ev_cars'
 SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
 
 bot = telebot.TeleBot(TOKEN)
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -85,65 +88,40 @@ def extract_json_from_text(text):
     return json.loads(text)
 
 def analyze_photo_fast(image_bytes):
-    b64_image = base64.b64encode(image_bytes).decode('utf-8')
+    image = Image.open(io.BytesIO(image_bytes))
     
     prompt = (
-        "Распознай показатели с экрана зарядной станции для электромобиля. "
-        "Найди значение разовой сессии зарядки (поле 'Энергия' или 'kWh'). "
-        "Верни исключительно JSON в формате: "
+        "Распознай показатели с дисплея зарядной станции для электромобиля. "
+        "Найди значение текущей разовой сессии зарядки (поле 'Энергия' или 'kWh'). "
+        "Например: 'Энергия 13.2kwh' -> 13.2. "
+        "Верни строго валидный JSON: "
         "{\"odo\": null, \"kwh\": 13.2, \"location_type\": \"🏠 Дом\"}"
     )
 
-    payload = {
-        "contents": [{
-            "parts": [
-                {"text": prompt},
-                {
-                    "inlineData": {
-                        "mimeType": "image/jpeg",
-                        "data": b64_image
-                    }
-                }
-            ]
-        }],
-        "generationConfig": {
-            "temperature": 0.1,
-            "responseMimeType": "application/json"
-        }
-    }
-
-    # Список моделей от самой быстрой/стабильной к запасным
-    candidate_models = [
-        ("v1beta", "gemini-1.5-flash-latest"),
-        ("v1beta", "gemini-1.5-flash"),
-        ("v1beta", "gemini-2.0-flash"),
-        ("v1beta", "gemini-1.5-pro-latest"),
-        ("v1", "gemini-1.5-flash")
+    models_to_try = [
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash"
     ]
 
     last_error = ""
-    for api_ver, model_name in candidate_models:
-        url = f"https://generativelanguage.googleapis.com/{api_ver}/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+    for model_name in models_to_try:
         try:
-            response = requests.post(url, json=payload, timeout=12)
-            if response.ok:
-                data = response.json()
-                raw_text = data['candidates'][0]['content']['parts'][0]['text']
-                parsed = extract_json_from_text(raw_text)
-                return parsed, None
-            elif response.status_code == 404:
-                # Пробуем следующую модель
-                continue
-            elif response.status_code in [429, 503]:
-                time.sleep(1)
-                continue
-            else:
-                last_error = f"{model_name} ({response.status_code}): {response.text[:120]}"
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[prompt, image],
+                config=genai_types.GenerateContentConfig(
+                    temperature=0.1,
+                    response_mime_type="application/json"
+                )
+            )
+            if response.text:
+                return extract_json_from_text(response.text), None
         except Exception as e:
             last_error = str(e)
             time.sleep(0.5)
 
-    return None, f"Ошибка Gemini: {last_error or 'Все модели вернули 404'}"
+    return None, f"Ошибка распознавания: {last_error}"
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
