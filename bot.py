@@ -79,7 +79,7 @@ def clean_json_string(s):
     return s.strip()
 
 def analyze_photo_fast(image_bytes):
-    models = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"]
+    models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
     b64_image = base64.b64encode(image_bytes).decode('utf-8')
     
     prompt = """
@@ -108,15 +108,20 @@ def analyze_photo_fast(image_bytes):
         }
     }
 
-    headers = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": GEMINI_API_KEY
-    }
+    # Варианты авторизации: Bearer Token, Header x-goog-api-key, URL param
+    auth_variants = [
+        ("Bearer", {"Content-Type": "application/json", "Authorization": f"Bearer {GEMINI_API_KEY}"}, False),
+        ("HeaderKey", {"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY}, False),
+        ("QueryParam", {"Content-Type": "application/json"}, True)
+    ]
 
     last_error = ""
     for model_name in models:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
-        for attempt in range(2):
+        for auth_name, headers, is_param in auth_variants:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+            if is_param:
+                url += f"?key={GEMINI_API_KEY}"
+
             try:
                 response = requests.post(url, headers=headers, json=payload, timeout=12)
                 if response.ok:
@@ -127,11 +132,10 @@ def analyze_photo_fast(image_bytes):
                     time.sleep(1)
                     continue
                 else:
-                    last_error = f"Код {response.status_code}: {response.text[:120]}"
-                    break
+                    last_error = f"{auth_name} ({response.status_code}): {response.text[:120]}"
             except Exception as e:
                 last_error = str(e)
-                time.sleep(1)
+                time.sleep(0.5)
 
     return None, f"Ошибка Gemini: {last_error}"
 
