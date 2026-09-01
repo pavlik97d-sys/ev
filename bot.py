@@ -78,35 +78,7 @@ def clean_json_string(s):
     s = re.sub(r'```\s*', '', s)
     return s.strip()
 
-def get_available_models():
-    default_models = [
-        "gemini-1.5-flash-001",
-        "gemini-1.5-flash-002",
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-8b",
-        "gemini-2.0-flash-exp",
-        "gemini-1.5-pro-001"
-    ]
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
-        res = requests.get(url, timeout=5)
-        if res.ok:
-            data = res.json()
-            models = []
-            for m in data.get('models', []):
-                methods = m.get('supportedGenerationMethods', [])
-                if 'generateContent' in methods:
-                    name = m.get('name', '').replace('models/', '')
-                    if name:
-                        models.append(name)
-            if models:
-                return models
-    except Exception:
-        pass
-    return default_models
-
 def analyze_photo_fast(image_bytes):
-    models = get_available_models()
     b64_image = base64.b64encode(image_bytes).decode('utf-8')
     
     prompt = """
@@ -122,8 +94,8 @@ def analyze_photo_fast(image_bytes):
             "parts": [
                 {"text": prompt},
                 {
-                    "inlineData": {
-                        "mimeType": "image/jpeg",
+                    "inline_data": {
+                        "mime_type": "image/jpeg",
                         "data": b64_image
                     }
                 }
@@ -135,25 +107,29 @@ def analyze_photo_fast(image_bytes):
         }
     }
 
+    endpoints = [
+        "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent",
+        "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent",
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    ]
+
     last_error = ""
-    for model_name in models:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
-        for attempt in range(2):
-            try:
-                response = requests.post(url, json=payload, timeout=12)
-                if response.ok:
-                    data = response.json()
-                    raw_text = data['candidates'][0]['content']['parts'][0]['text']
-                    return json.loads(clean_json_string(raw_text)), None
-                elif response.status_code in [503, 429]:
-                    time.sleep(1)
-                    continue
-                else:
-                    last_error = f"{model_name} ({response.status_code}): {response.text[:120]}"
-                    break
-            except Exception as e:
-                last_error = str(e)
-                time.sleep(0.5)
+    for url in endpoints:
+        try:
+            full_url = f"{url}?key={GEMINI_API_KEY}"
+            response = requests.post(full_url, json=payload, timeout=12)
+            if response.ok:
+                data = response.json()
+                raw_text = data['candidates'][0]['content']['parts'][0]['text']
+                return json.loads(clean_json_string(raw_text)), None
+            elif response.status_code in [503, 429]:
+                time.sleep(1)
+                continue
+            else:
+                last_error = f"({response.status_code}): {response.text[:120]}"
+        except Exception as e:
+            last_error = str(e)
+            time.sleep(0.5)
 
     return None, f"Ошибка Gemini: {last_error}"
 
