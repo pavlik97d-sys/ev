@@ -13,7 +13,7 @@ from telebot import types
 from telebot.apihelper import ApiTelegramException
 
 TOKEN = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU'
-WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=105'
+WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=106'
 OCR_API_KEY = 'K81090819088957'
 
 SUPABASE_REST = 'https://smxvjnlbwiaoudwlbvud.supabase.co/rest/v1/ev_cars'
@@ -52,16 +52,13 @@ def find_user_car(user_id):
         if res.ok:
             cars = res.json()
             user_str = str(user_id)
-            # 1. Поиск по owner_id
             for car in cars:
                 if str(car.get('owner_id')) == user_str:
                     return car
-            # 2. Поиск по drivers
             for car in cars:
                 drivers = car.get('drivers') or []
                 if isinstance(drivers, list) and user_str in [str(d) for d in drivers]:
                     return car
-            # 3. Поиск Geely EX5
             for car in cars:
                 if 'geely' in str(car.get('name', '')).lower():
                     return car
@@ -86,13 +83,10 @@ def update_car_in_supabase(car):
 
 def parse_charging_screen(text):
     clean_text = text.replace(',', '.')
-    
-    # 1. Поиск блока разовой сессии: Энергия XX.X kwh
     energy_match = re.search(r'(?:энергия|energy)[\s:]*([0-9]+(?:\.[0-9]+)?)\s*(?:kwh|квт)?', clean_text, re.IGNORECASE)
     if energy_match:
         return float(energy_match.group(1))
 
-    # 2. Поиск чисел перед kwh/квт
     kwh_match = re.findall(r'([0-9]+(?:\.[0-9]+)?)\s*(?:kwh|квт)', clean_text, re.IGNORECASE)
     if kwh_match:
         return float(kwh_match[0])
@@ -127,11 +121,11 @@ def analyze_photo_with_ocr(image_bytes):
             if kwh is not None:
                 return kwh, None
             else:
-                return None, "Цифры энергии (13.2 кВт⋅ч) не найдены. Попробуйте сфотографировать дисплей ближе."
+                return None, "Цифры энергии не найдены. Сфотографируйте экран чуть ближе."
         else:
             return None, f"Сервер OCR недоступен: {response.status_code}"
     except Exception as e:
-        return None, f"Таймаут сервиса OCR: {str(e)}"
+        return None, f"Таймаут OCR: {str(e)}"
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
@@ -228,15 +222,27 @@ def handle_mileage_input(message):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('loc_'))
 def handle_location_callback(call):
     user_id = call.from_user.id
-    data = PENDING_SESSIONS.get(user_id)
 
-    if not data:
-        bot.answer_callback_query(call.id, "Сессия устарела. Отправьте фото еще раз.", show_alert=True)
-        return
+    try:
+        bot.answer_callback_query(call.id)
+    except Exception:
+        pass
 
     if call.data == "loc_cancel":
-        del PENDING_SESSIONS[user_id]
-        bot.edit_message_text("❌ Запись отменена.", call.message.chat.id, call.message.message_id)
+        if user_id in PENDING_SESSIONS:
+            del PENDING_SESSIONS[user_id]
+        try:
+            bot.edit_message_text("❌ Запись отменена.", call.message.chat.id, call.message.message_id, reply_markup=None)
+        except Exception:
+            pass
+        return
+
+    data = PENDING_SESSIONS.get(user_id)
+    if not data:
+        try:
+            bot.edit_message_text("⚠️ Сессия устарела. Отправьте фото заново.", call.message.chat.id, call.message.message_id, reply_markup=None)
+        except Exception:
+            pass
         return
 
     car = data['car']
@@ -272,7 +278,8 @@ def handle_location_callback(call):
     car['logs'] = logs
 
     if update_car_in_supabase(car):
-        del PENDING_SESSIONS[user_id]
+        if user_id in PENDING_SESSIONS:
+            del PENDING_SESSIONS[user_id]
         markup = types.InlineKeyboardMarkup()
         web_app = types.WebAppInfo(url=WEB_APP_URL)
         btn = types.InlineKeyboardButton(text="📊 Открыть EV Garage", web_app=web_app)
@@ -287,7 +294,10 @@ def handle_location_callback(call):
             f"🛣️ Пробег: {odo_val} км\n"
             f"👤 Записал: {user_name}"
         )
-        bot.edit_message_text(text_res, call.message.chat.id, call.message.message_id, reply_markup=markup)
+        try:
+            bot.edit_message_text(text_res, call.message.chat.id, call.message.message_id, reply_markup=markup)
+        except Exception:
+            bot.send_message(call.message.chat.id, text_res, reply_markup=markup)
     else:
         bot.send_message(call.message.chat.id, "❌ Ошибка сохранения в базу данных.")
 
