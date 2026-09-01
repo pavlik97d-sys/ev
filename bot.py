@@ -1,11 +1,13 @@
 import telebot
 from telebot import types
+from telebot.apihelper import ApiTelegramException
 import requests
 import json
 import base64
 import re
 import threading
 import os
+import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 
@@ -84,7 +86,7 @@ def analyze_photo_fast(image_bytes):
     
     prompt = """
     Изучи экран зарядной станции или одометр авто.
-    Если на дисплее написано 'Энергия 12.0kwh' и 'Сумм. эн. 14.4kwh' — выбери сессию 'Энергия' (12.0).
+    Если на дисплее написано 'Энергия 12.0kwh' и 'Сумм. эн. 14.4kwh' — выбери значение текущей сессии 'Энергия' (12.0).
     Верни ТОЛЬКО валидный JSON:
     {"odo": null, "kwh": 12.0, "location_type": "🏠 Дом"}
     """
@@ -147,7 +149,6 @@ def handle_photo(message):
     status_msg = bot.reply_to(message, "⚡ Считываю показатели с фото...", reply_markup=get_main_keyboard())
 
     try:
-        # Берём оптимизированный размер (второй с конца)
         photo_obj = message.photo[-2] if len(message.photo) > 1 else message.photo[-1]
         file_info = bot.get_file(photo_obj.file_id)
         file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_info.file_path}"
@@ -224,5 +225,19 @@ if __name__ == '__main__':
         bot.set_my_commands([types.BotCommand("start", "⚡ Меню / Пробудить бота")])
     except Exception:
         pass
-    print("Сервер и бот успешно запущены!")
-    bot.infinity_polling(timeout=10, long_polling_timeout=5)
+    print("Сервер запущен. Подключение к Telegram...")
+
+    # Цикл с автоматическим восстановлением при конфликте копий (Error 409)
+    while True:
+        try:
+            bot.polling(none_stop=True, interval=0, timeout=20, skip_pending=True)
+        except ApiTelegramException as e:
+            if e.error_code == 409:
+                print("Обнаружен конфликт копий (Error 409). Ждем 5 сек завершения предыдущей...")
+                time.sleep(5)
+            else:
+                print(f"Telegram API Exception: {e}")
+                time.sleep(3)
+        except Exception as e:
+            print(f"Polling error: {e}")
+            time.sleep(3)
