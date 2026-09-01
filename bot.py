@@ -13,7 +13,7 @@ from datetime import datetime
 
 TOKEN = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU'
 WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=103'
-GEMINI_API_KEY = 'AQ.Ab8RN6KbfqfRqqcqP0tYz2YiD3PHe8hcR2Ee4Pb1aM9c9rZYRA'
+GEMINI_API_KEY = 'AIzaSyBuuDOecQ1TBmC2VhCDgxICSYjlGoqraz8'
 
 SUPABASE_REST = 'https://smxvjnlbwiaoudwlbvud.supabase.co/rest/v1/ev_cars'
 SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
@@ -79,7 +79,7 @@ def clean_json_string(s):
     return s.strip()
 
 def analyze_photo_fast(image_bytes):
-    models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+    models = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"]
     b64_image = base64.b64encode(image_bytes).decode('utf-8')
     
     prompt = """
@@ -108,22 +108,12 @@ def analyze_photo_fast(image_bytes):
         }
     }
 
-    # Варианты авторизации: Bearer Token, Header x-goog-api-key, URL param
-    auth_variants = [
-        ("Bearer", {"Content-Type": "application/json", "Authorization": f"Bearer {GEMINI_API_KEY}"}, False),
-        ("HeaderKey", {"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY}, False),
-        ("QueryParam", {"Content-Type": "application/json"}, True)
-    ]
-
     last_error = ""
     for model_name in models:
-        for auth_name, headers, is_param in auth_variants:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
-            if is_param:
-                url += f"?key={GEMINI_API_KEY}"
-
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+        for attempt in range(2):
             try:
-                response = requests.post(url, headers=headers, json=payload, timeout=12)
+                response = requests.post(url, json=payload, timeout=12)
                 if response.ok:
                     data = response.json()
                     raw_text = data['candidates'][0]['content']['parts'][0]['text']
@@ -132,7 +122,8 @@ def analyze_photo_fast(image_bytes):
                     time.sleep(1)
                     continue
                 else:
-                    last_error = f"{auth_name} ({response.status_code}): {response.text[:120]}"
+                    last_error = f"{model_name} ({response.status_code}): {response.text[:120]}"
+                    break
             except Exception as e:
                 last_error = str(e)
                 time.sleep(0.5)
