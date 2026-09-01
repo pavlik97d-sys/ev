@@ -13,8 +13,8 @@ from datetime import datetime
 TOKEN = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU'
 WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=103'
 
-# Ваш Auth-ключ из Google AI Studio
-GEMINI_API_KEY = 'AQ.Ab8RN6JIMgftitQlpp-EUF-uNq_lb_4J...'  # Вставьте сюда скопированный ключ
+# Ваш полный ключ Gemini
+GEMINI_API_KEY = 'AQ.Ab8RN6JlMgftitQlpp-EUF-uNq_lb_4JbcmTyTP3B4RvRKFn6Q'
 
 SUPABASE_REST = 'https://smxvjnlbwiaoudwlbvud.supabase.co/rest/v1/ev_cars'
 SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
@@ -81,7 +81,6 @@ def clean_json_string(s):
     return s.strip()
 
 def analyze_photo_fast(image_bytes):
-    """Распознавание с правильным заголовком x-goog-api-key для Auth-ключей AQ."""
     url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
     
     headers = {
@@ -92,11 +91,11 @@ def analyze_photo_fast(image_bytes):
     b64_image = base64.b64encode(image_bytes).decode('utf-8')
     
     prompt = """
-    Внимательно изучи экран зарядной станции (например, Energy Charger) или приборной панели.
-    Если на экране зарядки есть "Энергия" (за текущую сессию) и "Сумм. эн." (общая сумма) — возьми значение текущей сессии "Энергия".
+    Внимательно изучи экран зарядной станции (Energy Charger) или приборной панели.
+    Если на дисплее есть "Энергия" (текущая сессия) и "Сумм. эн." (общий счетчик) — обязательно выбери значение текущей сессии "Энергия".
     Например: "Энергия 12.0kwh" -> верни 12.0.
 
-    Верни ТОЛЬКО JSON без пояснений:
+    Верни ТОЛЬКО валидный JSON:
     {"odo": null, "kwh": 12.0, "location_type": "🏠 Дом"}
     """
 
@@ -162,6 +161,7 @@ def handle_photo(message):
     status_msg = bot.reply_to(message, "⚡ Считываю показатели с фото...", reply_markup=get_main_keyboard())
 
     try:
+        # Берём оптимизированное превью
         photo_obj = message.photo[-2] if len(message.photo) > 1 else message.photo[-1]
         file_info = bot.get_file(photo_obj.file_id)
         file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_info.file_path}"
