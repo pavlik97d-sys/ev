@@ -20,7 +20,6 @@ SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
 
 bot = telebot.TeleBot(TOKEN)
 
-# HTTP сервер для поддержания работы на Render
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -80,13 +79,20 @@ def clean_json_string(s):
     return s.strip()
 
 def analyze_photo_fast(image_bytes):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    # Прямой эндпоинт без ключа в строке URL
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    
+    # Ключи AQ передаются строго в HTTP заголовке
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY
+    }
     
     b64_image = base64.b64encode(image_bytes).decode('utf-8')
     
     prompt = """
     Изучи экран зарядной станции. 
-    Если написано 'Энергия [число]kwh' и 'Сумм. эн. [число]kwh' — выдели значение текущей сессии 'Энергия'.
+    Если на дисплее написано 'Энергия 13.2kwh' и 'Сумм. эн. 14.6kwh' — выдели текущую сессию 'Энергия' (13.2).
     Верни строго валидный JSON:
     {"odo": null, "kwh": 13.2, "location_type": "🏠 Дом"}
     """
@@ -110,13 +116,13 @@ def analyze_photo_fast(image_bytes):
     }
 
     try:
-        response = requests.post(url, json=payload, timeout=12)
+        response = requests.post(url, headers=headers, json=payload, timeout=12)
         if response.ok:
             data = response.json()
             raw_text = data['candidates'][0]['content']['parts'][0]['text']
             return json.loads(clean_json_string(raw_text)), None
         else:
-            return None, f"Ошибка Gemini {response.status_code}"
+            return None, f"Ошибка Gemini {response.status_code}: {response.text[:120]}"
     except Exception as e:
         return None, f"Ошибка сети: {str(e)}"
 
@@ -146,7 +152,6 @@ def handle_photo(message):
     user_id = message.from_user.id
     user_name = message.from_user.first_name or "Водитель"
     
-    # Отправляем статус
     status_msg = bot.reply_to(message, "⚡ Считываю показатели с фото...")
 
     try:
@@ -161,7 +166,6 @@ def handle_photo(message):
 
         parsed, err = analyze_photo_fast(img_res.content)
 
-        # Удаляем временное сообщение "Считываю..."
         try:
             bot.delete_message(message.chat.id, status_msg.message_id)
         except Exception:
