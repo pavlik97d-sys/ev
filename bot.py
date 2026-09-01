@@ -20,6 +20,7 @@ SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
 
 bot = telebot.TeleBot(TOKEN)
 
+# HTTP сервер для активности на Render
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -79,7 +80,13 @@ def clean_json_string(s):
     return s.strip()
 
 def analyze_photo_fast(image_bytes):
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
+    # Список моделей по приоритету скорости и стабильности
+    models = [
+        "gemini-1.5-flash-8b",
+        "gemini-1.5-flash",
+        "gemini-2.0-flash-exp",
+        "gemini-1.5-pro"
+    ]
     
     headers = {
         "Content-Type": "application/json",
@@ -91,6 +98,7 @@ def analyze_photo_fast(image_bytes):
     prompt = """
     Изучи экран зарядной станции. 
     Если на дисплее написано 'Энергия [число]kwh' и 'Сумм. эн. [число]kwh' — выдели текущую сессию 'Энергия'.
+    Например: "Энергия 13.2kwh" -> верни 13.2.
     Верни строго валидный JSON:
     {"odo": null, "kwh": 13.2, "location_type": "🏠 Дом"}
     """
@@ -113,16 +121,26 @@ def analyze_photo_fast(image_bytes):
         }
     }
 
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=12)
-        if response.ok:
-            data = response.json()
-            raw_text = data['candidates'][0]['content']['parts'][0]['text']
-            return json.loads(clean_json_string(raw_text)), None
-        else:
-            return None, f"Ошибка Gemini {response.status_code}: {response.text[:120]}"
-    except Exception as e:
-        return None, f"Ошибка сети: {str(e)}"
+    last_error = ""
+    for model_name in models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=8)
+            if response.ok:
+                data = response.json()
+                raw_text = data['candidates'][0]['content']['parts'][0]['text']
+                return json.loads(clean_json_string(raw_text)), None
+            elif response.status_code in [503, 429]:
+                # Если перегружена, мгновенно пробуем следующую модель
+                last_error = f"{model_name} busy ({response.status_code})"
+                time.sleep(0.5)
+                continue
+            else:
+                last_error = f"Ошибка Gemini {response.status_code}: {response.text[:100]}"
+        except Exception as e:
+            last_error = str(e)
+
+    return None, f"Сервера перегружены: {last_error}"
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
