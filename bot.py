@@ -14,7 +14,7 @@ from datetime import datetime
 TOKEN = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU'
 WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=103'
 
-# Ваш полный ключ
+# Ваш действующий ключ
 GEMINI_API_KEY = 'AQ.Ab8RN6JHkqRpYHkNetqwKDHG9S5Q3gJMU0ydidR0DY-QKZk_Ag'
 
 SUPABASE_REST = 'https://smxvjnlbwiaoudwlbvud.supabase.co/rest/v1/ev_cars'
@@ -22,7 +22,7 @@ SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
 
 bot = telebot.TeleBot(TOKEN)
 
-# HTTP сервер для фоновой активности на Render
+# HTTP сервер для поддержания работы контейнера Render
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -82,7 +82,17 @@ def clean_json_string(s):
     return s.strip()
 
 def analyze_photo_fast(image_bytes):
-    models = ["gemini-1.5-flash", "gemini-1.5-pro"]
+    # Работаем со стабильными версиями v1 и v1beta
+    endpoints = [
+        "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent",
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    ]
+    
+    headers = {
+        "Content-Type": "application/json",
+        "X-goog-api-key": GEMINI_API_KEY
+    }
+    
     b64_image = base64.b64encode(image_bytes).decode('utf-8')
     
     prompt = """
@@ -112,10 +122,9 @@ def analyze_photo_fast(image_bytes):
     }
 
     last_error = ""
-    for model_name in models:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+    for url in endpoints:
         try:
-            response = requests.post(url, json=payload, timeout=12)
+            response = requests.post(url, headers=headers, json=payload, timeout=12)
             if response.ok:
                 data = response.json()
                 raw_text = data['candidates'][0]['content']['parts'][0]['text']
