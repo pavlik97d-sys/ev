@@ -12,8 +12,9 @@
     .card-clean { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.05); }
     .accent-blue { background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); }
     .filter-btn-active { background-color: #2563eb; color: #ffffff; border-color: #2563eb; }
-    .preset-chip { background: #f8fafc; border: 1px solid #e2e8f0; transition: all 0.2s; }
-    .preset-chip:active { transform: scale(0.95); background: #eff6ff; border-color: #3b82f6; }
+    .preset-chip { background: #f8fafc; border: 1px solid #e2e8f0; color: #334155; transition: all 0.2s; }
+    .preset-chip:active { transform: scale(0.95); }
+    .preset-chip-selected { background: #2563eb !important; border-color: #2563eb !important; color: #ffffff !important; font-weight: bold; }
   </style>
 </head>
 <body class="p-3.5 select-none min-h-screen pb-14 space-y-3">
@@ -63,7 +64,7 @@
 
     <div class="grid grid-cols-2 gap-2.5">
       <div>
-        <label class="text-[10px] uppercase font-bold text-slate-400 mb-1 block">Одометр (км):</label>
+        <label class="text-[10px] uppercase font-bold text-slate-400 mb-1 block">Текущий пробег (км):</label>
         <input id="odo" type="number" onfocus="haptic('light')" placeholder="Напр. 15420" class="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition shadow-inner">
       </div>
       <div>
@@ -81,7 +82,7 @@
     <div class="grid grid-cols-2 gap-2.5">
       <div>
         <label class="text-[10px] uppercase font-bold text-slate-400 mb-1 block">Цена за 1 кВт⋅ч (₽):</label>
-        <input id="rate" type="number" step="any" onfocus="haptic('light')" placeholder="2.8" class="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold text-slate-800 outline-none focus:border-blue-500 transition">
+        <input id="rate" type="number" step="any" oninput="onManualRateChange()" onfocus="haptic('light')" placeholder="2.8" class="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold text-slate-800 outline-none focus:border-blue-500 transition">
       </div>
       <div>
         <label class="text-[10px] uppercase font-bold text-slate-400 mb-1 block">Локация:</label>
@@ -133,9 +134,9 @@
     </div>
 
     <div class="card-clean rounded-2xl p-3.5 border-l-4 border-indigo-500">
-      <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">🛣️ Дистанция</div>
+      <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">🛣️ Пробег за период</div>
       <div id="period-dist" class="text-lg font-black text-slate-800 mt-0.5">0 км</div>
-      <div id="last-charge-summary" class="text-[10px] font-medium text-indigo-600 truncate mt-0.5">По одометру</div>
+      <div id="last-charge-summary" class="text-[10px] font-medium text-indigo-600 truncate mt-0.5">По пробегу</div>
     </div>
   </div>
 
@@ -196,7 +197,6 @@
           <input id="carCapInput" type="number" step="any" placeholder="18.7" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs outline-none focus:border-blue-500">
         </div>
 
-        <!-- Поле со-водителей -->
         <div class="border-t border-slate-100 pt-2">
           <label class="text-[10px] font-bold text-blue-600 uppercase flex items-center justify-between">
             <span>👥 Telegram ID со-водителей:</span>
@@ -306,6 +306,7 @@
     }
 
     let selectedCarId = localStorage.getItem('ev_active_car_id') || allCars[0].id;
+    let selectedPresetKey = localStorage.getItem('ev_selected_preset_key') || null;
     let currentFilter = 'all';
     let chartMode = 'weekday';
     let chartInstance = null;
@@ -412,26 +413,65 @@
       }
     }
 
-    function applyPreset(rateVal, label) {
+    function onManualRateChange() {
+      const val = document.getElementById('rate').value;
+      if (val !== '') {
+        localStorage.setItem('ev_last_rate', val);
+      }
+      selectedPresetKey = null;
+      localStorage.removeItem('ev_selected_preset_key');
+      renderPresetButtons();
+    }
+
+    function applyPreset(rateVal, label, presetKey) {
       haptic('light');
+      selectedPresetKey = presetKey;
+      localStorage.setItem('ev_selected_preset_key', presetKey);
+      localStorage.setItem('ev_last_rate', rateVal);
+
       document.getElementById('rate').value = rateVal;
       const locSelect = document.getElementById('locationSelect');
       if (label.includes('Работа')) locSelect.value = '💼 Работа';
       else if (label.includes('Ночь') || label.includes('День')) locSelect.value = '🏠 Дом';
       else if (label.includes('ЭЗС')) locSelect.value = '⚡ ЭЗС';
       else locSelect.value = '🎁 Другое';
+
+      renderPresetButtons();
     }
 
     function renderPresetButtons() {
       const car = getSelectedCar();
       const r = car.rates || { night: 2.8, day: 6.5, work: 0, ez: 19.0 };
+
+      const isNight = selectedPresetKey === 'night';
+      const isDay = selectedPresetKey === 'day';
+      const isWork = selectedPresetKey === 'work';
+      const isEz = selectedPresetKey === 'ez';
+      const isFree = selectedPresetKey === 'free';
+
       document.getElementById('presetsContainer').innerHTML = `
-        <button onclick="applyPreset(${r.night}, '🏠 Ночь')" class="preset-chip px-3 py-1.5 rounded-lg text-[11px] font-bold text-slate-700 whitespace-nowrap">🏠 Ночь ${r.night}₽</button>
-        <button onclick="applyPreset(${r.day}, '🏠 День')" class="preset-chip px-3 py-1.5 rounded-lg text-[11px] font-bold text-slate-700 whitespace-nowrap">🏠 День ${r.day}₽</button>
-        <button onclick="applyPreset(${r.work}, '💼 Работа')" class="preset-chip px-3 py-1.5 rounded-lg text-[11px] font-bold text-blue-700 bg-blue-50/50 border-blue-200 whitespace-nowrap">💼 Работа ${r.work}₽</button>
-        <button onclick="applyPreset(${r.ez}, '⚡ ЭЗС')" class="preset-chip px-3 py-1.5 rounded-lg text-[11px] font-bold text-slate-700 whitespace-nowrap">⚡ ЭЗС ${r.ez}₽</button>
-        <button onclick="applyPreset(0, '🎁 0₽')" class="preset-chip px-3 py-1.5 rounded-lg text-[11px] font-bold text-emerald-600 whitespace-nowrap">🎁 0₽</button>
+        <button onclick="applyPreset(${r.night}, '🏠 Ночь', 'night')" class="preset-chip ${isNight ? 'preset-chip-selected' : ''} px-3 py-1.5 rounded-lg text-[11px] whitespace-nowrap">🏠 Ночь ${r.night}₽</button>
+        <button onclick="applyPreset(${r.day}, '🏠 День', 'day')" class="preset-chip ${isDay ? 'preset-chip-selected' : ''} px-3 py-1.5 rounded-lg text-[11px] whitespace-nowrap">🏠 День ${r.day}₽</button>
+        <button onclick="applyPreset(${r.work}, '💼 Работа', 'work')" class="preset-chip ${isWork ? 'preset-chip-selected' : ''} px-3 py-1.5 rounded-lg text-[11px] whitespace-nowrap">💼 Работа ${r.work}₽</button>
+        <button onclick="applyPreset(${r.ez}, '⚡ ЭЗС', 'ez')" class="preset-chip ${isEz ? 'preset-chip-selected' : ''} px-3 py-1.5 rounded-lg text-[11px] whitespace-nowrap">⚡ ЭЗС ${r.ez}₽</button>
+        <button onclick="applyPreset(0, '🎁 0₽', 'free')" class="preset-chip ${isFree ? 'preset-chip-selected' : ''} px-3 py-1.5 rounded-lg text-[11px] text-emerald-600 whitespace-nowrap">🎁 0₽</button>
       `;
+    }
+
+    function restoreLastRate() {
+      const car = getSelectedCar();
+      const logs = car.logs || [];
+      let savedRate = localStorage.getItem('ev_last_rate');
+
+      if (savedRate === null || savedRate === undefined) {
+        if (logs.length > 0) {
+          savedRate = logs[logs.length - 1].rate ?? car.rates?.night ?? 2.8;
+        } else {
+          savedRate = car.rates?.night ?? 2.8;
+        }
+      }
+
+      document.getElementById('rate').value = savedRate;
     }
 
     function populateMonthSelect() {
@@ -549,6 +589,7 @@
       selectedCarId = id;
       localStorage.setItem('ev_active_car_id', selectedCarId);
       updateCatalogUI();
+      restoreLastRate();
       render();
     }
 
@@ -793,6 +834,9 @@
       const rateVal = parseFloat(rate);
       const totalPrice = parseFloat((kwhVal * rateVal).toFixed(2));
 
+      // Сохраняем тариф для следующего раза
+      localStorage.setItem('ev_last_rate', rateVal);
+
       if (!car.logs) car.logs = [];
       car.logs.push({
         odo: parseFloat(odo),
@@ -808,7 +852,6 @@
 
       document.getElementById('odo').value = '';
       document.getElementById('kwh').value = '';
-      document.getElementById('rate').value = '';
       haptic('success');
       populateMonthSelect();
       render();
@@ -927,6 +970,7 @@
     // Запуск
     initChart();
     updateCatalogUI();
+    restoreLastRate();
     render();
     fetchFromCloud();
   </script>
