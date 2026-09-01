@@ -14,14 +14,15 @@ from datetime import datetime
 TOKEN = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU'
 WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=103'
 
-# Ваш новый ключ
-GEMINI_API_KEY = 'AQ.Ab8RN6JHkqRpYHkNetqwKDHG9S5Q3gJMU0ydidR0DY-QKZk_Ag'  # Вставьте сюда полный скопированный ключ со скриншота
+# Ваш полный ключ
+GEMINI_API_KEY = 'AQ.Ab8RN6JHkqRpYHkNetqwKDHG9S5Q3gJMU0ydidR0DY-QKZk_Ag'
 
 SUPABASE_REST = 'https://smxvjnlbwiaoudwlbvud.supabase.co/rest/v1/ev_cars'
 SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
 
 bot = telebot.TeleBot(TOKEN)
 
+# HTTP сервер для фоновой активности на Render
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -81,8 +82,7 @@ def clean_json_string(s):
     return s.strip()
 
 def analyze_photo_fast(image_bytes):
-    # Работаем со стабильными версиями
-    models = ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-2.0-flash-exp"]
+    models = ["gemini-1.5-flash", "gemini-1.5-pro"]
     b64_image = base64.b64encode(image_bytes).decode('utf-8')
     
     prompt = """
@@ -115,16 +115,16 @@ def analyze_photo_fast(image_bytes):
     for model_name in models:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
         try:
-            response = requests.post(url, json=payload, timeout=10)
+            response = requests.post(url, json=payload, timeout=12)
             if response.ok:
                 data = response.json()
                 raw_text = data['candidates'][0]['content']['parts'][0]['text']
                 return json.loads(clean_json_string(raw_text)), None
             elif response.status_code in [503, 429]:
-                time.sleep(0.5)
+                time.sleep(1)
                 continue
             else:
-                last_error = f"Код {response.status_code}: {response.text[:120]}"
+                last_error = f"Код {response.status_code}: {response.text[:100]}"
         except Exception as e:
             last_error = str(e)
 
@@ -180,7 +180,7 @@ def handle_photo(message):
             return
 
         if not parsed or (parsed.get('odo') is None and parsed.get('kwh') is None):
-            bot.send_message(message.chat.id, "⚠️ Не удалось распознать цифры на экране. Сделайте снимок ближе.")
+            bot.send_message(message.chat.id, "⚠️ Не удалось распознать цифры на экране. Попробуйте сделать снимок ближе.")
             return
 
         car = find_user_car(user_id)
