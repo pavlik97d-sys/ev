@@ -181,7 +181,7 @@
     </button>
   </div>
 
-  <!-- Модалка авто + Со-водители -->
+  <!-- Модалка параметров авто -->
   <div id="carModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
     <div class="bg-white w-full max-w-sm rounded-2xl p-4 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
       <h3 id="modalTitle" class="text-sm font-bold text-blue-600 mb-1">⚙️ Параметры и тарифы</h3>
@@ -278,10 +278,12 @@
     const SUPABASE_REST = 'https://smxvjnlbwiaoudwlbvud.supabase.co/rest/v1/ev_cars';
     const SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2';
 
-    // Получение текущего пользователя Telegram
     const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user || { id: '817508403', first_name: 'PavelfromSPb', username: 'PavelfromSPb' };
     const currentUserId = String(tgUser.id || '817508403');
     const currentUserName = tgUser.first_name || tgUser.username || 'Водитель';
+
+    // Очищаем старый кэш списка машин при открытии
+    localStorage.removeItem('ev_global_cars');
 
     let allCars = [];
     let selectedCarId = localStorage.getItem('ev_active_car_id') || 'car_817508403';
@@ -336,13 +338,14 @@
       return c;
     }
 
-    // Строгая проверка прав доступа без общих списков
+    // Строгая проверка прав: только по ID
     function checkCanEdit(car) {
-      const ownerIdStr = String(car.owner_id || car.ownerId || '');
-      const driversList = (car.drivers || []).map(String);
-      
-      const isOwner = (ownerIdStr === currentUserId);
-      const isDriver = driversList.includes(currentUserId);
+      const myId = String(tgUser?.id || '');
+      const carOwnerId = String(car?.owner_id || car?.ownerId || '');
+      const driversList = Array.isArray(car?.drivers) ? car.drivers.map(String) : [];
+
+      const isOwner = (myId !== '' && carOwnerId === myId);
+      const isDriver = (myId !== '' && driversList.includes(myId));
 
       return { isOwner, isDriver, canEdit: isOwner || isDriver };
     }
@@ -359,7 +362,7 @@
           if (Array.isArray(data) && data.length > 0) {
             allCars = data;
             
-            // Если выбранное авто не существует или чужое, выбираем авто пользователя по умолчанию
+            // Если выбранное авто не существует или чужое, выбираем свое авто
             if (!allCars.some(c => c.id === selectedCarId)) {
               const myOwn = allCars.find(c => checkCanEdit(c).isOwner) || allCars.find(c => checkCanEdit(c).isDriver) || allCars[0];
               if (myOwn) selectedCarId = myOwn.id;
@@ -698,7 +701,7 @@
 
     function renderRecentLogs() {
       const car = getSelectedCar();
-      const { canEdit, isOwner } = checkCanEdit(car);
+      const { canEdit } = checkCanEdit(car);
       const container = document.getElementById('recentLogsContainer');
       const logs = car.logs || [];
 
@@ -941,9 +944,6 @@
     }
 
     // Запуск
-    // Принудительный сброс закэшированного списка машин
-localStorage.removeItem('ev_global_cars');
-
     initChart();
     updateCatalogUI();
     restoreLastRate();
