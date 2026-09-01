@@ -4,18 +4,35 @@ import requests
 import json
 import base64
 import re
+import threading
+import os
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 
 # --- КОНФИГУРАЦИЯ ---
 TOKEN = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU'
 WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=103'
-
 GEMINI_API_KEY = 'AQ.Ab8RN6LOhgXxeTni3tHuDoYaaz_xjbkqpvQpbEevspclGu7--A'
 
 SUPABASE_REST = 'https://smxvjnlbwiaoudwlbvud.supabase.co/rest/v1/ev_cars'
 SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
 
 bot = telebot.TeleBot(TOKEN)
+
+# Простой HTTP-сервер, чтобы Render успешно завершал Deploy
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b"OK")
+    def log_message(self, format, *args):
+        pass
+
+def run_http_server():
+    port = int(os.environ.get('PORT', 10000))
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    server.serve_forever()
 
 def get_supabase_headers():
     return {
@@ -26,7 +43,6 @@ def get_supabase_headers():
     }
 
 def find_user_car(user_id):
-    """Поиск автомобиля владельца или со-водителя"""
     try:
         res = requests.get(f"{SUPABASE_REST}?select=*", headers=get_supabase_headers(), timeout=10)
         if res.ok:
@@ -38,15 +54,13 @@ def find_user_car(user_id):
                 drivers = car.get('drivers') or []
                 if isinstance(drivers, list) and user_str in [str(d) for d in drivers]:
                     return car
-            # Если прямой привязки нет, берем первую машину
             if cars:
                 return cars[0]
     except Exception as e:
-        print(f"Ошибка получения авто: {e}")
+        print(f"Ошибка Supabase: {e}")
     return None
 
 def update_car_in_supabase(car):
-    """Обновление журнала в Supabase"""
     try:
         url = f"{SUPABASE_REST}?id=eq.{car['id']}"
         payload = {
@@ -60,27 +74,24 @@ def update_car_in_supabase(car):
         return False
 
 def clean_json_string(s):
-    """Очистка от markdown-блоков ```json ... ```"""
     s = re.sub(r'```json\s*', '', s)
     s = re.sub(r'```\s*', '', s)
     return s.strip()
 
 def analyze_photo_with_gemini(image_bytes):
-    """Распознавание показателей через Gemini Vision"""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-    
     b64_image = base64.b64encode(image_bytes).decode('utf-8')
     
     prompt = """
     Ты эксперт по электромобилям и зарядным станциям.
-    Внимательно изучи экран (это может быть дисплей домашней зарядки типа Wallbox/Energy Charger, экран ЭЗС или приборная панель автомобиля).
+    Внимательно изучи экран (это дисплей зарядной станции Wallbox/Energy Charger, экран ЭЗС или приборная панель авто).
     
     Найди параметры:
-    1. "kwh": Заряженная энергия (kWh / кВт⋅ч / Энергия / Заряд). Например, если написано "Энергия 11.7kwh", верни 11.7. Если нет, верни null.
-    2. "odo": Общий пробег автомобиля (ODO / км / Пробег / Total km). Только если это приборная панель авто. Если это зарядная станция, верни null.
-    3. "location_type": Если это домашняя станция / гараж / розетка — верни "🏠 Дом". Если публичная станция — "⚡ ЭЗС".
+    1. "kwh": Заряженная энергия (kWh / кВт⋅ч / Энергия). Например: если написано "Энергия 11.7kwh", верни 11.7. Если нет, верни null.
+    2. "odo": Общий пробег авто (только если это приборка). Если нет, верни null.
+    3. "location_type": Если домашняя зарядка — "🏠 Дом", если публичная — "⚡ ЭЗС".
 
-    Верни ТОЛЬКО JSON формат:
+    Верни ТОЛЬКО валидный JSON:
     {"odo": null, "kwh": 11.7, "location_type": "🏠 Дом"}
     """
 
@@ -88,12 +99,7 @@ def analyze_photo_with_gemini(image_bytes):
         "contents": [{
             "parts": [
                 {"text": prompt},
-                {
-                    "inline_data": {
-                        "mime_type": "image/jpeg",
-                        "data": b64_image
-                    }
-                }
+                {"inline_data": {"mime_type": "image/jpeg", "data": b64_image}}
             ]
         }]
     }
@@ -103,10 +109,7 @@ def analyze_photo_with_gemini(image_bytes):
         if response.ok:
             data = response.json()
             raw_text = data['candidates'][0]['content']['parts'][0]['text']
-            cleaned = clean_json_string(raw_text)
-            return json.loads(cleaned)
-        else:
-            print(f"Ошибка Gemini API: {response.status_code} {response.text}")
+            return json.loads(clean_json_string(raw_text))
     except Exception as e:
         print(f"Ошибка парсинга Gemini: {e}")
     return None
@@ -121,7 +124,7 @@ def start_handler(message):
     bot.send_message(
         message.chat.id,
         "👋 Привет! Добро пожаловать в **EV Garage**.\n\n"
-        "📸 **Отчет по фото:** Просто отправьте фотографию экрана зарядки или приборной панели — показатели считаются автоматически!\n\n"
+        "📸 **Отчет по фото:** Отправьте фотографию экрана зарядки или приборной панели — бот автоматически считает показатели!\n\n"
         "Открыть панель аналитики:",
         reply_markup=markup,
         parse_mode="Markdown"
@@ -147,8 +150,8 @@ def handle_photo(message):
 
         if not parsed or (parsed.get('odo') is None and parsed.get('kwh') is None):
             bot.edit_message_text(
-                "⚠️ Не удалось четко распознать кВт⋅ч или пробег на фото.\n"
-                "Сделайте снимок экрана чуть ближе или внесите сессию через WebApp.",
+                "⚠️ Не удалось четко распознать кВт⋅ч на фото.\n"
+                "Сделайте снимок ближе или внесите данные через WebApp.",
                 message.chat.id,
                 status_msg.message_id
             )
@@ -156,32 +159,16 @@ def handle_photo(message):
 
         car = find_user_car(user_id)
         if not car:
-            bot.edit_message_text(
-                "⚠️ Автомобиль не найден. Откройте WebApp и сохраните ваш автомобиль.",
-                message.chat.id,
-                status_msg.message_id
-            )
+            bot.edit_message_text("⚠️ Автомобиль не найден.", message.chat.id, status_msg.message_id)
             return
 
         logs = car.get('logs') or []
-        
-        # Если пробег на зарядной станции отсутствует, берем последний пробег авто
-        odo_val = parsed.get('odo')
-        if odo_val is None:
-            odo_val = logs[-1].get('odo', 0) if logs else 0
-            
+        odo_val = parsed.get('odo') or (logs[-1].get('odo', 0) if logs else 0)
         kwh_val = parsed.get('kwh') or 0.0
         loc_val = parsed.get('location_type') or '🏠 Дом'
         
-        # Берем тариф из настроек авто
         rates = car.get('rates') or {'night': 2.8, 'day': 6.5, 'work': 0, 'ez': 19.0}
-        if 'Дом' in loc_val:
-            rate_val = rates.get('night', 2.8)
-        elif 'Работа' in loc_val:
-            rate_val = rates.get('work', 0.0)
-        else:
-            rate_val = rates.get('ez', 19.0)
-
+        rate_val = rates.get('night', 2.8) if 'Дом' in loc_val else (rates.get('work', 0.0) if 'Работа' in loc_val else rates.get('ez', 19.0))
         total_price = round(float(kwh_val) * float(rate_val), 2)
 
         new_entry = {
@@ -205,7 +192,7 @@ def handle_photo(message):
             markup.add(btn)
 
             bot.edit_message_text(
-                f"✅ **Сессия успешно распознана и сохранена!**\n\n"
+                f"✅ **Сессия сохранена по фото!**\n\n"
                 f"🚗 **Авто:** {car.get('name')}\n"
                 f"🔋 **Заряжено:** +{kwh_val} кВт⋅ч\n"
                 f"📍 **Локация:** {loc_val} ({rate_val} ₽/кВт⋅ч)\n"
@@ -218,11 +205,12 @@ def handle_photo(message):
                 parse_mode="Markdown"
             )
         else:
-            bot.edit_message_text("❌ Ошибка сохранения в базу данных.", message.chat.id, status_msg.message_id)
+            bot.edit_message_text("❌ Ошибка сохранения в базу.", message.chat.id, status_msg.message_id)
 
     except Exception as e:
         bot.edit_message_text(f"⚠️ Ошибка: {e}", message.chat.id, status_msg.message_id)
 
 if __name__ == '__main__':
-    print("Бот запущен и ожидает команды и фото...")
+    threading.Thread(target=run_http_server, daemon=True).start()
+    print("Сервер и бот успешно запущены!")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
