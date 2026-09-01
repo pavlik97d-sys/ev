@@ -14,16 +14,13 @@ from telebot.apihelper import ApiTelegramException
 
 TOKEN = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU'
 WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=105'
-
 OCR_API_KEY = 'K81090819088957'
 
 SUPABASE_REST = 'https://smxvjnlbwiaoudwlbvud.supabase.co/rest/v1/ev_cars'
 SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
 
-bot = telebot.TeleBot(TOKEN)
+bot = telebot.TeleBot(TOKEN, threaded=True)
 
-# Временное хранилище текущей сессии перед сохранением
-# { user_id: { "kwh": 13.2, "car": {...}, "odo": 12000, "user_name": "Pavel" } }
 PENDING_SESSIONS = {}
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -51,15 +48,22 @@ def get_supabase_headers():
 
 def find_user_car(user_id):
     try:
-        res = requests.get(f"{SUPABASE_REST}?select=*", headers=get_supabase_headers(), timeout=5)
+        res = requests.get(f"{SUPABASE_REST}?select=*", headers=get_supabase_headers(), timeout=10)
         if res.ok:
             cars = res.json()
             user_str = str(user_id)
+            # 1. Поиск по owner_id
             for car in cars:
                 if str(car.get('owner_id')) == user_str:
                     return car
+            # 2. Поиск по drivers
+            for car in cars:
                 drivers = car.get('drivers') or []
                 if isinstance(drivers, list) and user_str in [str(d) for d in drivers]:
+                    return car
+            # 3. Поиск Geely EX5
+            for car in cars:
+                if 'geely' in str(car.get('name', '')).lower():
                     return car
             if cars:
                 return cars[0]
@@ -74,7 +78,7 @@ def update_car_in_supabase(car):
             'logs': car.get('logs', []),
             'updated_at': datetime.utcnow().isoformat()
         }
-        res = requests.patch(url, headers=get_supabase_headers(), json=payload, timeout=5)
+        res = requests.patch(url, headers=get_supabase_headers(), json=payload, timeout=10)
         return res.ok
     except Exception as e:
         print(f"Update error: {e}")
@@ -83,12 +87,12 @@ def update_car_in_supabase(car):
 def parse_charging_screen(text):
     clean_text = text.replace(',', '.')
     
-    # Поиск разовой сессии: Энергия XX.X kwh
+    # 1. Поиск блока разовой сессии: Энергия XX.X kwh
     energy_match = re.search(r'(?:энергия|energy)[\s:]*([0-9]+(?:\.[0-9]+)?)\s*(?:kwh|квт)?', clean_text, re.IGNORECASE)
     if energy_match:
         return float(energy_match.group(1))
 
-    # Резервный поиск числа перед kwh
+    # 2. Поиск чисел перед kwh/квт
     kwh_match = re.findall(r'([0-9]+(?:\.[0-9]+)?)\s*(?:kwh|квт)', clean_text, re.IGNORECASE)
     if kwh_match:
         return float(kwh_match[0])
@@ -107,7 +111,7 @@ def analyze_photo_with_ocr(image_bytes):
             'scale': True,
             'OCREngine': 2
         }
-        response = requests.post(url, files=files, data=payload, timeout=15)
+        response = requests.post(url, files=files, data=payload, timeout=25)
         if response.ok:
             result = response.json()
             if result.get('IsErroredOnProcessing'):
@@ -115,7 +119,7 @@ def analyze_photo_with_ocr(image_bytes):
             
             parsed_results = result.get('ParsedResults', [])
             if not parsed_results:
-                return None, "Не удалось прочитать текст на фото"
+                return None, "Не удалось распознать текст на фото"
             
             full_text = parsed_results[0].get('ParsedText', '')
             kwh = parse_charging_screen(full_text)
@@ -123,11 +127,11 @@ def analyze_photo_with_ocr(image_bytes):
             if kwh is not None:
                 return kwh, None
             else:
-                return None, "Цифры зарядки (кВт⋅ч) не обнаружены на дисплее"
+                return None, "Цифры энергии (13.2 кВт⋅ч) не найдены. Попробуйте сфотографировать дисплей ближе."
         else:
-            return None, f"Ошибка сервера OCR: {response.status_code}"
+            return None, f"Сервер OCR недоступен: {response.status_code}"
     except Exception as e:
-        return None, f"Ошибка сервиса: {str(e)}"
+        return None, f"Таймаут сервиса OCR: {str(e)}"
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
@@ -142,7 +146,7 @@ def get_main_keyboard():
 def start_handler(message):
     bot.send_message(
         message.chat.id,
-        "👋 EV Garage готов к работе!\n\n📸 Отправьте фото экрана зарядной станции.",
+        "👋 EV Garage на связи!\n\n📸 Отправьте фото экрана зарядки — бот автоматически считает кВт⋅ч.",
         reply_markup=get_main_keyboard()
     )
 
@@ -155,39 +159,33 @@ def handle_photo(message):
     user_id = message.from_user.id
     user_name = message.from_user.first_name or "Водитель"
     
-    status_msg = bot.reply_to(message, "⚡ Считываю показатели с фото...")
+    status_msg = bot.reply_to(message, "⚡ Считываю показатели с дисплея...")
 
     try:
-        photo_obj = message.photo[-2] if len(message.photo) > 1 else message.photo[-1]
+        photo_obj = message.photo[-1]
         file_info = bot.get_file(photo_obj.file_id)
         file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_info.file_path}"
-        img_res = requests.get(file_url, timeout=8)
+        img_res = requests.get(file_url, timeout=12)
         
         if not img_res.ok:
-            bot.send_message(message.chat.id, "❌ Не удалось скачать фото из Telegram.")
+            bot.edit_message_text("❌ Ошибка загрузки фото из Telegram.", message.chat.id, status_msg.message_id)
             return
 
         kwh_val, err = analyze_photo_with_ocr(img_res.content)
 
-        try:
-            bot.delete_message(message.chat.id, status_msg.message_id)
-        except Exception:
-            pass
-
         if err or kwh_val is None:
-            bot.send_message(message.chat.id, f"⚠️ {err or 'Не удалось распознать кВт⋅ч'}")
+            bot.edit_message_text(f"⚠️ {err or 'Не удалось считать данные'}", message.chat.id, status_msg.message_id)
             return
 
         car = find_user_car(user_id)
         if not car:
-            bot.send_message(message.chat.id, "⚠️ Автомобиль не найден в базе Supabase.")
+            bot.edit_message_text("⚠️ Автомобиль не найден в базе Supabase.", message.chat.id, status_msg.message_id)
             return
 
         logs = car.get('logs') or []
         last_odo = logs[-1].get('odo', 0) if logs else 0
         rates = car.get('rates') or {'night': 2.8, 'day': 6.5, 'work': 0.0, 'ez': 19.0}
 
-        # Сохраняем во временный буфер
         PENDING_SESSIONS[user_id] = {
             'kwh': kwh_val,
             'car': car,
@@ -195,7 +193,6 @@ def handle_photo(message):
             'user_name': user_name
         }
 
-        # Клавиатура выбора локации и тарифа
         markup = types.InlineKeyboardMarkup(row_width=2)
         btn_night = types.InlineKeyboardButton(f"🌙 Ночь ({rates.get('night', 2.8)}₽)", callback_data="loc_night")
         btn_day   = types.InlineKeyboardButton(f"☀️ День ({rates.get('day', 6.5)}₽)", callback_data="loc_day")
@@ -204,39 +201,37 @@ def handle_photo(message):
         btn_cancel = types.InlineKeyboardButton("❌ Отмена", callback_data="loc_cancel")
         markup.add(btn_night, btn_day, btn_work, btn_ez, btn_cancel)
 
-        bot.send_message(
+        bot.edit_message_text(
+            f"🔋 На экране обнаружено: **{kwh_val} кВт⋅ч**\n"
+            f"🛣️ Текущий пробег: **{last_odo} км**\n\n"
+            f"Выберите тариф или отправьте сообщением новый пробег:",
             message.chat.id,
-            f"🔋 Распознано: **{kwh_val} кВт⋅ч**\n"
-            f"🛣️ Текущий пробег в базе: **{last_odo} км**\n\n"
-            f"Выберите тариф и локацию для сохранения (или отправьте число, чтобы обновить пробег):",
+            status_msg.message_id,
             reply_markup=markup,
             parse_mode="Markdown"
         )
 
     except Exception as e:
-        bot.send_message(message.chat.id, f"⚠️ Ошибка обработки: {str(e)}")
+        try:
+            bot.edit_message_text(f"⚠️ Ошибка обработки: {str(e)}", message.chat.id, status_msg.message_id)
+        except Exception:
+            bot.send_message(message.chat.id, f"⚠️ Ошибка: {str(e)}")
 
-# Обработка ввода нового пробега текстом
 @bot.message_handler(func=lambda msg: msg.text and msg.text.isdigit())
 def handle_mileage_input(message):
     user_id = message.from_user.id
     if user_id in PENDING_SESSIONS:
         new_odo = int(message.text)
         PENDING_SESSIONS[user_id]['odo'] = new_odo
-        bot.reply_to(message, f"👌 Пробег обновлен на **{new_odo} км**. Теперь выберите тариф выше 👆", parse_mode="Markdown")
+        bot.reply_to(message, f"👌 Пробег обновлен на **{new_odo} км**. Выберите тариф кнопкой выше 👆", parse_mode="Markdown")
 
-# Обработка клика по кнопке тарифа
 @bot.callback_query_handler(func=lambda call: call.data.startswith('loc_'))
 def handle_location_callback(call):
     user_id = call.from_user.id
     data = PENDING_SESSIONS.get(user_id)
 
     if not data:
-        bot.answer_callback_query(call.id, "Сессия устарела. Отправьте фото заново.", show_alert=True)
-        try:
-            bot.delete_message(call.message.chat.id, call.message.message_id)
-        except Exception:
-            pass
+        bot.answer_callback_query(call.id, "Сессия устарела. Отправьте фото еще раз.", show_alert=True)
         return
 
     if call.data == "loc_cancel":
@@ -253,7 +248,7 @@ def handle_location_callback(call):
     loc_map = {
         'loc_night': ('🏠 Дом (Ночь)', rates.get('night', 2.8)),
         'loc_day':   ('☀️ Дом (День)', rates.get('day', 6.5)),
-        'loc_work':  ('🏢 Работа', rates.get('work', 0.0)),
+        'loc_work':  ('💼 Работа', rates.get('work', 0.0)),
         'loc_ez':    ('⚡ ЭЗС', rates.get('ez', 19.0))
     }
 
@@ -287,30 +282,22 @@ def handle_location_callback(call):
             f"✅ Сессия успешно сохранена!\n\n"
             f"🚗 Авто: {car.get('name')}\n"
             f"🔋 Заряжено: +{kwh_val} кВт⋅ч\n"
-            f"📍 Локация: {loc_val} ({rate_val} ₽/кВт⋅ч)\n"
+            f"📍 Тариф: {loc_val} ({rate_val} ₽/кВт⋅ч)\n"
             f"💰 Стоимость: {total_price} ₽\n"
             f"🛣️ Пробег: {odo_val} км\n"
             f"👤 Записал: {user_name}"
         )
         bot.edit_message_text(text_res, call.message.chat.id, call.message.message_id, reply_markup=markup)
     else:
-        bot.send_message(call.message.chat.id, "❌ Ошибка сохранения в Supabase.")
+        bot.send_message(call.message.chat.id, "❌ Ошибка сохранения в базу данных.")
 
 if __name__ == '__main__':
     threading.Thread(target=run_http_server, daemon=True).start()
-    try:
-        bot.set_my_commands([types.BotCommand("start", "⚡ Меню / Пробудить бота")])
-    except Exception:
-        pass
-    print("Сервер запущен. Бот слушает Telegram...")
+    print("EV Garage Bot запущен...")
 
     while True:
         try:
-            bot.polling(none_stop=True, interval=0, timeout=20, skip_pending=True)
-        except ApiTelegramException as e:
-            if e.error_code == 409:
-                time.sleep(5)
-            else:
-                time.sleep(3)
+            bot.infinity_polling(timeout=25, long_polling_timeout=20)
         except Exception as e:
+            print(f"Polling loop error: {e}")
             time.sleep(3)
