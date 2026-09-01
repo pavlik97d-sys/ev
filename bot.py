@@ -22,7 +22,7 @@ SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
 
 bot = telebot.TeleBot(TOKEN)
 
-# HTTP сервер для поддержания работы контейнера Render
+# HTTP сервер для поддержания активности на Render
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -82,11 +82,8 @@ def clean_json_string(s):
     return s.strip()
 
 def analyze_photo_fast(image_bytes):
-    # Работаем со стабильными версиями v1 и v1beta
-    endpoints = [
-        "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent",
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-    ]
+    # Модели с гарантированной доступностью в v1beta
+    models = ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-flash-latest"]
     
     headers = {
         "Content-Type": "application/json",
@@ -122,20 +119,24 @@ def analyze_photo_fast(image_bytes):
     }
 
     last_error = ""
-    for url in endpoints:
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=12)
-            if response.ok:
-                data = response.json()
-                raw_text = data['candidates'][0]['content']['parts'][0]['text']
-                return json.loads(clean_json_string(raw_text)), None
-            elif response.status_code in [503, 429]:
+    for model_name in models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+        for attempt in range(2):
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=10)
+                if response.ok:
+                    data = response.json()
+                    raw_text = data['candidates'][0]['content']['parts'][0]['text']
+                    return json.loads(clean_json_string(raw_text)), None
+                elif response.status_code in [503, 429]:
+                    time.sleep(1)
+                    continue
+                else:
+                    last_error = f"Код {response.status_code}: {response.text[:100]}"
+                    break
+            except Exception as e:
+                last_error = str(e)
                 time.sleep(1)
-                continue
-            else:
-                last_error = f"Код {response.status_code}: {response.text[:100]}"
-        except Exception as e:
-            last_error = str(e)
 
     return None, f"Ошибка Gemini: {last_error}"
 
