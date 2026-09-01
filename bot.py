@@ -13,7 +13,7 @@ from telebot import types
 from telebot.apihelper import ApiTelegramException
 
 TOKEN = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU'
-WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=104'
+WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=105'
 
 OCR_API_KEY = 'K81090819088957'
 
