@@ -941,6 +941,9 @@
     }
 
     // Запуск
+    // Принудительный сброс закэшированного списка машин
+localStorage.removeItem('ev_global_cars');
+
     initChart();
     updateCatalogUI();
     restoreLastRate();
