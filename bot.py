@@ -19,7 +19,7 @@ SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
 
 bot = telebot.TeleBot(TOKEN)
 
-# Простой HTTP-сервер для поддержки активности Render
+# Простой HTTP-сервер для поддержки Render
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -83,17 +83,16 @@ def analyze_photo_with_gemini(image_bytes):
     b64_image = base64.b64encode(image_bytes).decode('utf-8')
     
     prompt = """
-    Внимательно изучи изображение (экран зарядной станции, приборная панель авто или чек).
-    Найди следующие данные:
-    1. "kwh": Заряженная энергия в кВт⋅ч (kWh, Энергия). Например, если написано "11.7kwh", верни 11.7. Если нет, верни null.
-    2. "odo": Пробег авто в километрах. Если нет, верни null.
-    3. "location_type": "🏠 Дом" (если домашняя зарядка/Wallbox) или "⚡ ЭЗС" (если публичная станция).
+    Внимательно изучи изображение (экран зарядной станции Wallbox/Energy Charger, экран ЭЗС или приборная панель авто).
+    Найди параметры:
+    1. "kwh": Заряженная энергия в кВт⋅ч (kWh / кВтч / Энергия). Если написано "Энергия 11.7kwh", верни 11.7. Если нет, верни null.
+    2. "odo": Пробег авто в км (только если это одометр приборки). Если нет, верни null.
+    3. "location_type": "🏠 Дом" (если домашняя зарядка) или "⚡ ЭЗС" (если публичная).
 
     Верни ТОЛЬКО JSON:
     {"odo": null, "kwh": 11.7, "location_type": "🏠 Дом"}
     """
 
-    # Важно: inlineData (в camelCase для Gemini API)
     payload = {
         "contents": [{
             "parts": [
@@ -114,34 +113,44 @@ def analyze_photo_with_gemini(image_bytes):
             data = response.json()
             raw_text = data['candidates'][0]['content']['parts'][0]['text']
             return json.loads(clean_json_string(raw_text))
-        else:
-            print(f"Gemini API Error: {response.status_code} {response.text}")
     except Exception as e:
-        print(f"Gemini Exception: {e}")
+        print(f"Gemini error: {e}")
     return None
+
+def get_main_keyboard():
+    """Постоянная нижняя клавиатура"""
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+    web_app = types.WebAppInfo(url=WEB_APP_URL)
+    btn_app = types.KeyboardButton(text="⚡ Открыть EV Garage", web_app=web_app)
+    btn_start = types.KeyboardButton(text="🔄 Пробудить / Обновить бота")
+    markup.add(btn_app, btn_start)
+    return markup
 
 @bot.message_handler(commands=['start'])
 def start_handler(message):
-    markup = types.InlineKeyboardMarkup()
+    inline_markup = types.InlineKeyboardMarkup()
     web_app = types.WebAppInfo(url=WEB_APP_URL)
-    btn = types.InlineKeyboardButton(text="⚡ Открыть EV Garage", web_app=web_app)
-    markup.add(btn)
+    inline_markup.add(types.InlineKeyboardButton(text="⚡ Открыть EV Garage", web_app=web_app))
     
     bot.send_message(
         message.chat.id,
-        "👋 Привет! Добро пожаловать в **EV Garage**.\n\n"
-        "📸 **Отчет по фото:** Просто отправьте фотографию экрана зарядки или приборной панели — бот автоматически распознает показатели!\n\n"
-        "Или откройте гараж кнопкой ниже:",
-        reply_markup=markup,
+        "👋 **EV Garage активен!**\n\n"
+        "📸 **Отчет по фото:** Просто пришлите фотографию экрана зарядки или приборной панели — показатели запишутся автоматически.\n\n"
+        "Кнопки для быстрого запуска закреплены ниже ⬇️",
+        reply_markup=get_main_keyboard(),
         parse_mode="Markdown"
     )
+
+@bot.message_handler(func=lambda msg: msg.text == "🔄 Пробудить / Обновить бота")
+def wake_up_handler(message):
+    start_handler(message)
 
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     user_id = message.from_user.id
     user_name = message.from_user.first_name or "Водитель"
     
-    status_msg = bot.reply_to(message, "🔍 Считываю показатели с фото...")
+    status_msg = bot.reply_to(message, "🔍 Считываю показатели с фото...", reply_markup=get_main_keyboard())
 
     try:
         file_info = bot.get_file(message.photo[-1].file_id)
@@ -211,12 +220,19 @@ def handle_photo(message):
                 parse_mode="Markdown"
             )
         else:
-            bot.edit_message_text("❌ Ошибка сохранения в базу Supabase.", message.chat.id, status_msg.message_id)
+            bot.edit_message_text("❌ Ошибка сохранения в Supabase.", message.chat.id, status_msg.message_id)
 
     except Exception as e:
         bot.edit_message_text(f"⚠️ Ошибка: {e}", message.chat.id, status_msg.message_id)
 
 if __name__ == '__main__':
     threading.Thread(target=run_http_server, daemon=True).start()
+    try:
+        # Устанавливаем команду в меню Telegram
+        bot.set_my_commands([
+            types.BotCommand("start", "⚡ Открыть EV Garage / Перезапустить")
+        ])
+    except Exception:
+        pass
     print("Сервер и бот успешно запущены!")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
