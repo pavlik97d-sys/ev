@@ -62,11 +62,10 @@
       <span id="form-car-name" class="text-[10px] bg-white border border-blue-200 text-blue-700 font-bold px-2 py-0.5 rounded-md">Авто</span>
     </div>
 
-    <!-- Кнопки: Камера и Галерея -->
+    <!-- Кнопки: Камера и Галерея с автосжатием -->
     <div class="space-y-1.5">
       <label class="text-[10px] uppercase font-bold text-slate-400 block">Автосчитывание по фото экрана:</label>
       <div class="grid grid-cols-2 gap-2">
-        <!-- Скрытые инпуты -->
         <input id="cameraInput" type="file" accept="image/*" capture="environment" class="hidden" onchange="handleWebPhotoUpload(this, 'camera')">
         <input id="galleryInput" type="file" accept="image/*" class="hidden" onchange="handleWebPhotoUpload(this, 'gallery')">
 
@@ -382,7 +381,38 @@
       return { isOwner, isDriver, canEdit: isOwner || isDriver };
     }
 
-    // Обработчик загрузки как с камеры, так и из галереи
+    // Сжатие тяжелого фото перед отправкой
+    function compressImage(file, maxWidth = 1200, quality = 0.8) {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+          const img = new Image();
+          img.src = event.target.result;
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            let width = img.width;
+            let height = img.height;
+
+            if (width > maxWidth) {
+              height = Math.round((height * maxWidth) / width);
+              width = maxWidth;
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+
+            canvas.toBlob((blob) => {
+              resolve(blob);
+            }, 'image/jpeg', quality);
+          };
+        };
+      });
+    }
+
+    // Обработчик загрузки фото (камера / галерея)
     async function handleWebPhotoUpload(input, source) {
       const file = input.files?.[0];
       if (!file) return;
@@ -394,14 +424,16 @@
       btnText.innerText = '⏳ Считываю...';
       haptic('medium');
 
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('apikey', OCR_API_KEY);
-      formData.append('language', 'rus');
-      formData.append('OCREngine', '2');
-      formData.append('scale', 'true');
-
       try {
+        const compressedBlob = await compressImage(file, 1200, 0.8);
+
+        const formData = new FormData();
+        formData.append('file', compressedBlob, 'charge.jpg');
+        formData.append('apikey', OCR_API_KEY);
+        formData.append('language', 'rus');
+        formData.append('OCREngine', '2');
+        formData.append('scale', 'true');
+
         const res = await fetch('https://api.ocr.space/parse/image', {
           method: 'POST',
           body: formData
@@ -411,18 +443,19 @@
         if (data.ParsedResults && data.ParsedResults.length > 0) {
           const text = data.ParsedResults[0].ParsedText.replace(',', '.');
           
-          let match = text.match(/(?:энергия|energy)[\s:]*([0-9]+(?:\.[0-9]+)?)/i);
+          let match = text.match(/(?:энергия|сумм[\.\s]*эн|energy)[\s:]*([0-9]+(?:\.[0-9]+)?)/i);
           if (!match) match = text.match(/([0-9]+(?:\.[0-9]+)?)\s*(?:kwh|квт)/i);
+          if (!match) match = text.match(/([0-9]+\.[0-9]+)/);
 
           if (match && match[1]) {
             document.getElementById('kwh').value = match[1];
             haptic('success');
             notify(`✅ Распознано: ${match[1]} кВт⋅ч`);
           } else {
-            notify('⚠️ Цифры энергии не найдены. Выберите четкое фото дисплея.');
+            notify('⚠️ Цифры энергии не найдены. Сфотографируйте дисплей ближе.');
           }
         } else {
-          notify('⚠️ Не удалось считать текст с изображения.');
+          notify('⚠️ Сервер OCR не смог распознать текст.');
         }
       } catch (e) {
         notify('❌ Ошибка OCR: ' + e.message);
@@ -1024,7 +1057,7 @@
       }
     }
 
-    // Запуск
+    // Запуск приложения
     initChart();
     updateCatalogUI();
     restoreLastRate();
