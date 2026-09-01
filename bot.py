@@ -78,8 +78,35 @@ def clean_json_string(s):
     s = re.sub(r'```\s*', '', s)
     return s.strip()
 
+def get_available_models():
+    default_models = [
+        "gemini-1.5-flash-001",
+        "gemini-1.5-flash-002",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-8b",
+        "gemini-2.0-flash-exp",
+        "gemini-1.5-pro-001"
+    ]
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
+        res = requests.get(url, timeout=5)
+        if res.ok:
+            data = res.json()
+            models = []
+            for m in data.get('models', []):
+                methods = m.get('supportedGenerationMethods', [])
+                if 'generateContent' in methods:
+                    name = m.get('name', '').replace('models/', '')
+                    if name:
+                        models.append(name)
+            if models:
+                return models
+    except Exception:
+        pass
+    return default_models
+
 def analyze_photo_fast(image_bytes):
-    models = ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-1.5-pro"]
+    models = get_available_models()
     b64_image = base64.b64encode(image_bytes).decode('utf-8')
     
     prompt = """
