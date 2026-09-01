@@ -21,6 +21,10 @@ SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
 
 bot = telebot.TeleBot(TOKEN)
 
+# Временное хранилище текущей сессии перед сохранением
+# { user_id: { "kwh": 13.2, "car": {...}, "odo": 12000, "user_name": "Pavel" } }
+PENDING_SESSIONS = {}
+
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -78,12 +82,12 @@ def update_car_in_supabase(car):
 def parse_charging_screen(text):
     clean_text = text.replace(',', '.')
     
-    # 1. Поиск блока разовой сессии: Энергия XX.X kwh
+    # Поиск разовой сессии: Энергия XX.X kwh
     energy_match = re.search(r'(?:энергия|energy)[\s:]*([0-9]+(?:\.[0-9]+)?)\s*(?:kwh|квт)?', clean_text, re.IGNORECASE)
     if energy_match:
         return float(energy_match.group(1))
 
-    # 2. Поиск любого числа перед kwh/квт
+    # Резервный поиск числа перед kwh
     kwh_match = re.findall(r'([0-9]+(?:\.[0-9]+)?)\s*(?:kwh|квт)', clean_text, re.IGNORECASE)
     if kwh_match:
         return float(kwh_match[0])
@@ -116,7 +120,7 @@ def analyze_photo_with_ocr(image_bytes):
             kwh = parse_charging_screen(full_text)
             
             if kwh is not None:
-                return {"odo": None, "kwh": kwh, "location_type": "🏠 Дом"}, None
+                return kwh, None
             else:
                 return None, "Цифры зарядки (кВт⋅ч) не обнаружены на дисплее"
         else:
@@ -137,7 +141,7 @@ def get_main_keyboard():
 def start_handler(message):
     bot.send_message(
         message.chat.id,
-        "👋 EV Garage активен!\n\n📸 Отправьте фотографию экрана зарядки или одометра для автоматической записи.",
+        "👋 EV Garage готов к работе!\n\n📸 Отправьте фото экрана зарядной станции.",
         reply_markup=get_main_keyboard()
     )
 
@@ -162,19 +166,15 @@ def handle_photo(message):
             bot.send_message(message.chat.id, "❌ Не удалось скачать фото из Telegram.")
             return
 
-        parsed, err = analyze_photo_with_ocr(img_res.content)
+        kwh_val, err = analyze_photo_with_ocr(img_res.content)
 
         try:
             bot.delete_message(message.chat.id, status_msg.message_id)
         except Exception:
             pass
 
-        if err:
-            bot.send_message(message.chat.id, f"⚠️ {err}")
-            return
-
-        if not parsed or parsed.get('kwh') is None:
-            bot.send_message(message.chat.id, "⚠️ Не удалось распознать кВт⋅ч на экране. Попробуйте сфотографировать дисплей ближе.")
+        if err or kwh_val is None:
+            bot.send_message(message.chat.id, f"⚠️ {err or 'Не удалось распознать кВт⋅ч'}")
             return
 
         car = find_user_car(user_id)
@@ -183,50 +183,117 @@ def handle_photo(message):
             return
 
         logs = car.get('logs') or []
-        odo_val = parsed.get('odo') or (logs[-1].get('odo', 0) if logs else 0)
-        kwh_val = parsed.get('kwh') or 0.0
-        loc_val = parsed.get('location_type') or '🏠 Дом'
-        
-        rates = car.get('rates') or {'night': 2.8, 'day': 6.5, 'work': 0, 'ez': 19.0}
-        rate_val = rates.get('night', 2.8) if 'Дом' in loc_val else (rates.get('work', 0.0) if 'Работа' in loc_val else rates.get('ez', 19.0))
-        total_price = round(float(kwh_val) * float(rate_val), 2)
+        last_odo = logs[-1].get('odo', 0) if logs else 0
+        rates = car.get('rates') or {'night': 2.8, 'day': 6.5, 'work': 0.0, 'ez': 19.0}
 
-        new_entry = {
-            'id': str(int(datetime.utcnow().timestamp() * 1000)),
-            'odo': float(odo_val),
-            'kwh': float(kwh_val),
-            'rate': float(rate_val),
-            'location': loc_val,
-            'totalPrice': total_price,
-            'price': total_price,
-            'author': user_name,
-            'author_id': str(user_id),
-            'date': datetime.utcnow().isoformat()
+        # Сохраняем во временный буфер
+        PENDING_SESSIONS[user_id] = {
+            'kwh': kwh_val,
+            'car': car,
+            'odo': last_odo,
+            'user_name': user_name
         }
-        logs.append(new_entry)
-        car['logs'] = logs
 
-        if update_car_in_supabase(car):
-            markup = types.InlineKeyboardMarkup()
-            web_app = types.WebAppInfo(url=WEB_APP_URL)
-            btn = types.InlineKeyboardButton(text="📊 Открыть EV Garage", web_app=web_app)
-            markup.add(btn)
+        # Клавиатура выбора локации и тарифа
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        btn_night = types.InlineKeyboardButton(f"🌙 Ночь ({rates.get('night', 2.8)}₽)", callback_data="loc_night")
+        btn_day   = types.InlineKeyboardButton(f"☀️ День ({rates.get('day', 6.5)}₽)", callback_data="loc_day")
+        btn_work  = types.InlineKeyboardButton(f"🏢 Работа ({rates.get('work', 0.0)}₽)", callback_data="loc_work")
+        btn_ez    = types.InlineKeyboardButton(f"⚡ ЭЗС ({rates.get('ez', 19.0)}₽)", callback_data="loc_ez")
+        btn_cancel = types.InlineKeyboardButton("❌ Отмена", callback_data="loc_cancel")
+        markup.add(btn_night, btn_day, btn_work, btn_ez, btn_cancel)
 
-            text_res = (
-                f"✅ Сессия успешно сохранена!\n\n"
-                f"🚗 Авто: {car.get('name')}\n"
-                f"🔋 Заряжено: +{kwh_val} кВт⋅ч\n"
-                f"📍 Локация: {loc_val} ({rate_val} ₽/кВт⋅ч)\n"
-                f"💰 Стоимость: {total_price} ₽\n"
-                f"🛣️ Пробег: {odo_val} км\n"
-                f"👤 Записал: {user_name}"
-            )
-            bot.send_message(message.chat.id, text_res, reply_markup=markup)
-        else:
-            bot.send_message(message.chat.id, "❌ Ошибка сохранения в Supabase.")
+        bot.send_message(
+            message.chat.id,
+            f"🔋 Распознано: **{kwh_val} кВт⋅ч**\n"
+            f"🛣️ Текущий пробег в базе: **{last_odo} км**\n\n"
+            f"Выберите тариф и локацию для сохранения (или отправьте число, чтобы обновить пробег):",
+            reply_markup=markup,
+            parse_mode="Markdown"
+        )
 
     except Exception as e:
         bot.send_message(message.chat.id, f"⚠️ Ошибка обработки: {str(e)}")
+
+# Обработка ввода нового пробега текстом
+@bot.message_handler(func=lambda msg: msg.text and msg.text.isdigit())
+def handle_mileage_input(message):
+    user_id = message.from_user.id
+    if user_id in PENDING_SESSIONS:
+        new_odo = int(message.text)
+        PENDING_SESSIONS[user_id]['odo'] = new_odo
+        bot.reply_to(message, f"👌 Пробег обновлен на **{new_odo} км**. Теперь выберите тариф выше 👆", parse_mode="Markdown")
+
+# Обработка клика по кнопке тарифа
+@bot.callback_query_handler(func=lambda call: call.data.startswith('loc_'))
+def handle_location_callback(call):
+    user_id = call.from_user.id
+    data = PENDING_SESSIONS.get(user_id)
+
+    if not data:
+        bot.answer_callback_query(call.id, "Сессия устарела. Отправьте фото заново.", show_alert=True)
+        try:
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except Exception:
+            pass
+        return
+
+    if call.data == "loc_cancel":
+        del PENDING_SESSIONS[user_id]
+        bot.edit_message_text("❌ Запись отменена.", call.message.chat.id, call.message.message_id)
+        return
+
+    car = data['car']
+    kwh_val = data['kwh']
+    odo_val = data['odo']
+    user_name = data['user_name']
+    rates = car.get('rates') or {'night': 2.8, 'day': 6.5, 'work': 0.0, 'ez': 19.0}
+
+    loc_map = {
+        'loc_night': ('🏠 Дом (Ночь)', rates.get('night', 2.8)),
+        'loc_day':   ('☀️ Дом (День)', rates.get('day', 6.5)),
+        'loc_work':  ('🏢 Работа', rates.get('work', 0.0)),
+        'loc_ez':    ('⚡ ЭЗС', rates.get('ez', 19.0))
+    }
+
+    loc_val, rate_val = loc_map.get(call.data, ('🏠 Дом', 2.8))
+    total_price = round(float(kwh_val) * float(rate_val), 2)
+
+    logs = car.get('logs') or []
+    new_entry = {
+        'id': str(int(datetime.utcnow().timestamp() * 1000)),
+        'odo': float(odo_val),
+        'kwh': float(kwh_val),
+        'rate': float(rate_val),
+        'location': loc_val,
+        'totalPrice': total_price,
+        'price': total_price,
+        'author': user_name,
+        'author_id': str(user_id),
+        'date': datetime.utcnow().isoformat()
+    }
+    logs.append(new_entry)
+    car['logs'] = logs
+
+    if update_car_in_supabase(car):
+        del PENDING_SESSIONS[user_id]
+        markup = types.InlineKeyboardMarkup()
+        web_app = types.WebAppInfo(url=WEB_APP_URL)
+        btn = types.InlineKeyboardButton(text="📊 Открыть EV Garage", web_app=web_app)
+        markup.add(btn)
+
+        text_res = (
+            f"✅ Сессия успешно сохранена!\n\n"
+            f"🚗 Авто: {car.get('name')}\n"
+            f"🔋 Заряжено: +{kwh_val} кВт⋅ч\n"
+            f"📍 Локация: {loc_val} ({rate_val} ₽/кВт⋅ч)\n"
+            f"💰 Стоимость: {total_price} ₽\n"
+            f"🛣️ Пробег: {odo_val} км\n"
+            f"👤 Записал: {user_name}"
+        )
+        bot.edit_message_text(text_res, call.message.chat.id, call.message.message_id, reply_markup=markup)
+    else:
+        bot.send_message(call.message.chat.id, "❌ Ошибка сохранения в Supabase.")
 
 if __name__ == '__main__':
     threading.Thread(target=run_http_server, daemon=True).start()
