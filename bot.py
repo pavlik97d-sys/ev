@@ -19,7 +19,7 @@ SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
 
 bot = telebot.TeleBot(TOKEN)
 
-# HTTP-сервер для поддержки активности Render
+# HTTP-сервер для поддержки активности сервиса на Render
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -43,6 +43,7 @@ def get_supabase_headers():
     }
 
 def find_user_car(user_id):
+    """Поиск автомобиля владельца или со-водителя"""
     try:
         res = requests.get(f"{SUPABASE_REST}?select=*", headers=get_supabase_headers(), timeout=5)
         if res.ok:
@@ -57,10 +58,11 @@ def find_user_car(user_id):
             if cars:
                 return cars[0]
     except Exception as e:
-        print(f"Ошибка Supabase: {e}")
+        print(f"Ошибка получения авто из Supabase: {e}")
     return None
 
 def update_car_in_supabase(car):
+    """Безопасное сохранение сессии без изменения владельца"""
     try:
         url = f"{SUPABASE_REST}?id=eq.{car['id']}"
         payload = {
@@ -79,18 +81,18 @@ def clean_json_string(s):
     return s.strip()
 
 def analyze_photo_fast(image_bytes):
-    """Используем быструю модель Flash для распознавания за 1-2 секунды"""
+    """Распознавание показателей за 1-2 секунды через Gemini Flash Vision"""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     b64_image = base64.b64encode(image_bytes).decode('utf-8')
     
     prompt = """
-    Экран зарядной станции или одометр авто.
-    Верни краткий JSON:
-    1. "kwh": Заряженная энергия в кВт⋅ч (число, напр. 11.7). Если нет, null.
-    2. "odo": Пробег авто в км (число). Если нет, null.
-    3. "location_type": "🏠 Дом" или "⚡ ЭЗС".
+    Внимательно изучи изображение экрана зарядной станции или одометра авто.
+    Верни краткий JSON с параметрами:
+    1. "kwh": Заряженная энергия в кВт⋅ч (число с плавающей точкой, напр. 11.7). Если нет, верни null.
+    2. "odo": Пробег автомобиля в км (только если виден одометр). Если нет, верни null.
+    3. "location_type": "🏠 Дом" (если домашняя зарядка Wallbox/розетка) или "⚡ ЭЗС" (если публичная).
 
-    Формат JSON:
+    Формат ответа ТОЛЬКО JSON:
     {"odo": null, "kwh": 11.7, "location_type": "🏠 Дом"}
     """
 
@@ -118,8 +120,10 @@ def analyze_photo_fast(image_bytes):
             data = response.json()
             raw_text = data['candidates'][0]['content']['parts'][0]['text']
             return json.loads(clean_json_string(raw_text))
+        else:
+            print(f"Gemini API Error: {response.status_code} {response.text}")
     except Exception as e:
-        print(f"Gemini error: {e}")
+        print(f"Ошибка анализа Gemini: {e}")
     return None
 
 def get_main_keyboard():
@@ -136,7 +140,7 @@ def start_handler(message):
     bot.send_message(
         message.chat.id,
         "👋 **EV Garage активен!**\n\n"
-        "📸 **Отчет по фото:** Отправьте фотографию экрана зарядки или одометра.\n\n"
+        "📸 **Отчет по фото:** Отправьте фотографию экрана зарядки или одометра для автоматической записи.\n\n"
         "Открыть панель гаража:",
         reply_markup=get_main_keyboard(),
         parse_mode="Markdown"
@@ -151,10 +155,10 @@ def handle_photo(message):
     user_id = message.from_user.id
     user_name = message.from_user.first_name or "Водитель"
     
-    status_msg = bot.reply_to(message, "⚡ Считываю показатели...", reply_markup=get_main_keyboard())
+    status_msg = bot.reply_to(message, "⚡ Считываю показатели с фото...", reply_markup=get_main_keyboard())
 
     try:
-        # Берём оптимизированный размер (второй с конца), чтобы не качать 5 МБ
+        # Берем оптимизированное по весу превью
         photo_obj = message.photo[-2] if len(message.photo) > 1 else message.photo[-1]
         file_info = bot.get_file(photo_obj.file_id)
         file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_info.file_path}"
@@ -188,7 +192,9 @@ def handle_photo(message):
         rate_val = rates.get('night', 2.8) if 'Дом' in loc_val else (rates.get('work', 0.0) if 'Работа' in loc_val else rates.get('ez', 19.0))
         total_price = round(float(kwh_val) * float(rate_val), 2)
 
+        # Формируем запись сессии в точной структуре WebApp
         new_entry = {
+            'id': str(int(datetime.utcnow().timestamp() * 1000)),
             'odo': float(odo_val),
             'kwh': float(kwh_val),
             'rate': float(rate_val),
@@ -222,7 +228,7 @@ def handle_photo(message):
                 parse_mode="Markdown"
             )
         else:
-            bot.edit_message_text("❌ Ошибка сохранения в базу.", message.chat.id, status_msg.message_id)
+            bot.edit_message_text("❌ Ошибка сохранения в базу Supabase.", message.chat.id, status_msg.message_id)
 
     except Exception as e:
         bot.edit_message_text(f"⚠️ Ошибка: {e}", message.chat.id, status_msg.message_id)
