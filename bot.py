@@ -13,7 +13,7 @@ from datetime import datetime
 
 TOKEN = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU'
 WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=103'
-GEMINI_API_KEY = 'AQ.Ab8RN6LinRobg8SGVdSmr8-jUlPKgmr2Ji-rGZtdsL8piq4WYQ'
+GEMINI_API_KEY = 'AQ.Ab8RN6Iu4_N2cKYckXj1Kz1HGN7SCvr2P13ImoqnkdQlt2DLKg'
 
 SUPABASE_REST = 'https://smxvjnlbwiaoudwlbvud.supabase.co/rest/v1/ev_cars'
 SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
@@ -79,12 +79,11 @@ def clean_json_string(s):
     return s.strip()
 
 def analyze_photo_fast(image_bytes):
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
     
-    # Ключи AQ передаются как Bearer-токен
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {GEMINI_API_KEY}"
+        "X-goog-api-key": GEMINI_API_KEY
     }
     
     b64_image = base64.b64encode(image_bytes).decode('utf-8')
@@ -227,7 +226,7 @@ def handle_photo(message):
             bot.send_message(message.chat.id, "❌ Ошибка сохранения в Supabase.")
 
     except Exception as e:
-        bot.send_message(message.chat.id, f"⚠️ Ошибка: {str(e)}")
+        bot.send_message(message.chat.id, f"⚠️ Ошибка обработки: {str(e)}")
 
 if __name__ == '__main__':
     threading.Thread(target=run_http_server, daemon=True).start()
