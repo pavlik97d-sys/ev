@@ -3,15 +3,13 @@ from telebot import types
 from telebot.apihelper import ApiTelegramException
 import requests
 import json
+import base64
 import re
 import threading
 import os
 import time
-import io
-from PIL import Image
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
-import google.generativeai as genai
 
 TOKEN = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU'
 WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=103'
@@ -20,16 +18,8 @@ GEMINI_API_KEY = 'AQ.Ab8RN6LinRobg8SGVdSmr8-jUlPKgmr2Ji-rGZtdsL8piq4WYQ'
 SUPABASE_REST = 'https://smxvjnlbwiaoudwlbvud.supabase.co/rest/v1/ev_cars'
 SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
 
-# Настройка официального клиента Google Gemini
-genai.configure(api_key=GEMINI_API_KEY)
-ai_model = genai.GenerativeModel(
-    model_name="gemini-1.5-flash",
-    generation_config={"temperature": 0.1, "max_output_tokens": 100}
-)
-
 bot = telebot.TeleBot(TOKEN)
 
-# HTTP сервер для фоновой активности Render
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -89,25 +79,51 @@ def clean_json_string(s):
     return s.strip()
 
 def analyze_photo_fast(image_bytes):
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    
+    # Ключи AQ передаются как Bearer-токен
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {GEMINI_API_KEY}"
+    }
+    
+    b64_image = base64.b64encode(image_bytes).decode('utf-8')
+    
+    prompt = """
+    Изучи экран зарядной станции. 
+    Если на дисплее написано 'Энергия [число]kwh' и 'Сумм. эн. [число]kwh' — выдели текущую сессию 'Энергия'.
+    Верни строго валидный JSON:
+    {"odo": null, "kwh": 13.2, "location_type": "🏠 Дом"}
+    """
+
+    payload = {
+        "contents": [{
+            "parts": [
+                {"text": prompt},
+                {
+                    "inlineData": {
+                        "mimeType": "image/jpeg",
+                        "data": b64_image
+                    }
+                }
+            ]
+        }],
+        "generationConfig": {
+            "temperature": 0.1,
+            "maxOutputTokens": 60
+        }
+    }
+
     try:
-        # Открываем изображение через Pillow
-        img = Image.open(io.BytesIO(image_bytes))
-        
-        prompt = """
-        Внимательно изучи экран зарядной станции.
-        Если на дисплее написано 'Энергия [число]kwh' и 'Сумм. эн. [число]kwh' — выдели текущую сессию 'Энергия'.
-        Например: "Энергия 13.2kwh" -> верни 13.2.
-        
-        Верни ТОЛЬКО валидный JSON:
-        {"odo": null, "kwh": 13.2, "location_type": "🏠 Дом"}
-        """
-        
-        response = ai_model.generate_content([prompt, img])
-        if response.text:
-            return json.loads(clean_json_string(response.text)), None
-        return None, "Пустой ответ от Gemini"
+        response = requests.post(url, headers=headers, json=payload, timeout=12)
+        if response.ok:
+            data = response.json()
+            raw_text = data['candidates'][0]['content']['parts'][0]['text']
+            return json.loads(clean_json_string(raw_text)), None
+        else:
+            return None, f"Ошибка Gemini {response.status_code}: {response.text[:120]}"
     except Exception as e:
-        return None, f"Ошибка Gemini SDK: {str(e)}"
+        return None, f"Ошибка сети: {str(e)}"
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
@@ -159,7 +175,7 @@ def handle_photo(message):
             return
 
         if not parsed or (parsed.get('odo') is None and parsed.get('kwh') is None):
-            bot.send_message(message.chat.id, "⚠️ Не удалось распознать цифры на экране. Сделайте фото ближе.")
+            bot.send_message(message.chat.id, "⚠️ Не удалось распознать цифры на экране. Попробуйте сделать снимок ближе.")
             return
 
         car = find_user_car(user_id)
