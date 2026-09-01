@@ -6,8 +6,6 @@ import base64
 import re
 import threading
 import os
-import io
-from PIL import Image
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 
@@ -21,6 +19,7 @@ SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
 
 bot = telebot.TeleBot(TOKEN)
 
+# HTTP-сервер для поддержки активности Render
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -45,7 +44,7 @@ def get_supabase_headers():
 
 def find_user_car(user_id):
     try:
-        res = requests.get(f"{SUPABASE_REST}?select=*", headers=get_supabase_headers(), timeout=10)
+        res = requests.get(f"{SUPABASE_REST}?select=*", headers=get_supabase_headers(), timeout=5)
         if res.ok:
             cars = res.json()
             user_str = str(user_id)
@@ -68,7 +67,7 @@ def update_car_in_supabase(car):
             'logs': car.get('logs', []),
             'updated_at': datetime.utcnow().isoformat()
         }
-        res = requests.patch(url, headers=get_supabase_headers(), json=payload, timeout=10)
+        res = requests.patch(url, headers=get_supabase_headers(), json=payload, timeout=5)
         return res.ok
     except Exception as e:
         print(f"Ошибка сохранения: {e}")
@@ -79,31 +78,19 @@ def clean_json_string(s):
     s = re.sub(r'```\s*', '', s)
     return s.strip()
 
-def compress_image(image_bytes, max_size=(1024, 1024), quality=80):
-    """Сжатие фото в памяти для ускорения передачи в 10 раз"""
-    img = Image.open(io.BytesIO(image_bytes))
-    if img.mode in ("RGBA", "P"):
-        img = img.convert("RGB")
-    img.thumbnail(max_size, Image.Resampling.LANCZOS)
-    buffer = io.BytesIO()
-    img.save(buffer, format="JPEG", quality=quality, optimize=True)
-    return buffer.getvalue()
-
-def analyze_photo_with_gemini(image_bytes):
+def analyze_photo_fast(image_bytes):
+    """Используем быструю модель Flash для распознавания за 1-2 секунды"""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-    
-    # Сжимаем фото перед отправкой
-    compressed_bytes = compress_image(image_bytes)
-    b64_image = base64.b64encode(compressed_bytes).decode('utf-8')
+    b64_image = base64.b64encode(image_bytes).decode('utf-8')
     
     prompt = """
-    Изучи изображение зарядной станции или приборной панели авто.
-    Найди параметры:
-    1. "kwh": Заряженная энергия в кВт⋅ч (kWh / Энергия). Если написано "Энергия 11.7kwh", верни 11.7. Если нет, верни null.
-    2. "odo": Пробег авто в км (только одометр). Если нет, верни null.
+    Экран зарядной станции или одометр авто.
+    Верни краткий JSON:
+    1. "kwh": Заряженная энергия в кВт⋅ч (число, напр. 11.7). Если нет, null.
+    2. "odo": Пробег авто в км (число). Если нет, null.
     3. "location_type": "🏠 Дом" или "⚡ ЭЗС".
 
-    Верни ТОЛЬКО JSON:
+    Формат JSON:
     {"odo": null, "kwh": 11.7, "location_type": "🏠 Дом"}
     """
 
@@ -118,11 +105,15 @@ def analyze_photo_with_gemini(image_bytes):
                     }
                 }
             ]
-        }]
+        }],
+        "generationConfig": {
+            "temperature": 0.1,
+            "maxOutputTokens": 100
+        }
     }
 
     try:
-        response = requests.post(url, json=payload, timeout=15)
+        response = requests.post(url, json=payload, timeout=10)
         if response.ok:
             data = response.json()
             raw_text = data['candidates'][0]['content']['parts'][0]['text']
@@ -145,8 +136,8 @@ def start_handler(message):
     bot.send_message(
         message.chat.id,
         "👋 **EV Garage активен!**\n\n"
-        "📸 **Отчет по фото:** Отправьте фотографию экрана зарядки или одометра для автоматической записи.\n\n"
-        "Кнопки для быстрого запуска закреплены ниже ⬇️",
+        "📸 **Отчет по фото:** Отправьте фотографию экрана зарядки или одометра.\n\n"
+        "Открыть панель гаража:",
         reply_markup=get_main_keyboard(),
         parse_mode="Markdown"
     )
@@ -163,21 +154,21 @@ def handle_photo(message):
     status_msg = bot.reply_to(message, "⚡ Считываю показатели...", reply_markup=get_main_keyboard())
 
     try:
-        # Берем предпоследний размер превью Telegram (он уже оптимизирован по весу)
+        # Берём оптимизированный размер (второй с конца), чтобы не качать 5 МБ
         photo_obj = message.photo[-2] if len(message.photo) > 1 else message.photo[-1]
         file_info = bot.get_file(photo_obj.file_id)
         file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_info.file_path}"
-        img_res = requests.get(file_url, timeout=10)
+        img_res = requests.get(file_url, timeout=8)
         
         if not img_res.ok:
             bot.edit_message_text("❌ Ошибка загрузки фото из Telegram.", message.chat.id, status_msg.message_id)
             return
 
-        parsed = analyze_photo_with_gemini(img_res.content)
+        parsed = analyze_photo_fast(img_res.content)
 
         if not parsed or (parsed.get('odo') is None and parsed.get('kwh') is None):
             bot.edit_message_text(
-                "⚠️ Не удалось распознать кВт⋅ч.\nСделайте снимок ближе или запишите вручную.",
+                "⚠️ Не удалось распознать кВт⋅ч на фото.\nСделайте фото ближе или внесите данные через WebApp.",
                 message.chat.id,
                 status_msg.message_id
             )
