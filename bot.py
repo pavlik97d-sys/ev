@@ -12,14 +12,16 @@ from datetime import datetime
 # --- КОНФИГУРАЦИЯ ---
 TOKEN = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU'
 WEB_APP_URL = 'https://pavlik97d-sys.github.io/ev/?v=103'
-GEMINI_API_KEY = 'AQ.Ab8RN6LOhgXxeTni3tHuDoYaaz_xjbkqpvQpbEevspclGu7--A'
+
+# Ваш Auth-ключ из Google AI Studio
+GEMINI_API_KEY = 'AQ.Ab8RN6JIMgftitQlpp-EUF-uNq_lb_4J...'  # Вставьте сюда скопированный ключ
 
 SUPABASE_REST = 'https://smxvjnlbwiaoudwlbvud.supabase.co/rest/v1/ev_cars'
 SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2'
 
 bot = telebot.TeleBot(TOKEN)
 
-# HTTP-сервер для поддержки активности сервиса на Render
+# HTTP сервер для активности Render
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -43,7 +45,6 @@ def get_supabase_headers():
     }
 
 def find_user_car(user_id):
-    """Поиск автомобиля владельца или со-водителя"""
     try:
         res = requests.get(f"{SUPABASE_REST}?select=*", headers=get_supabase_headers(), timeout=5)
         if res.ok:
@@ -58,11 +59,10 @@ def find_user_car(user_id):
             if cars:
                 return cars[0]
     except Exception as e:
-        print(f"Ошибка получения авто из Supabase: {e}")
+        print(f"Ошибка Supabase: {e}")
     return None
 
 def update_car_in_supabase(car):
-    """Безопасное сохранение сессии без изменения владельца"""
     try:
         url = f"{SUPABASE_REST}?id=eq.{car['id']}"
         payload = {
@@ -81,19 +81,23 @@ def clean_json_string(s):
     return s.strip()
 
 def analyze_photo_fast(image_bytes):
-    """Распознавание показателей за 1-2 секунды через Gemini Flash Vision"""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    """Распознавание с правильным заголовком x-goog-api-key для Auth-ключей AQ."""
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY
+    }
+    
     b64_image = base64.b64encode(image_bytes).decode('utf-8')
     
     prompt = """
-    Внимательно изучи изображение экрана зарядной станции или одометра авто.
-    Верни краткий JSON с параметрами:
-    1. "kwh": Заряженная энергия в кВт⋅ч (число с плавающей точкой, напр. 11.7). Если нет, верни null.
-    2. "odo": Пробег автомобиля в км (только если виден одометр). Если нет, верни null.
-    3. "location_type": "🏠 Дом" (если домашняя зарядка Wallbox/розетка) или "⚡ ЭЗС" (если публичная).
+    Внимательно изучи экран зарядной станции (например, Energy Charger) или приборной панели.
+    Если на экране зарядки есть "Энергия" (за текущую сессию) и "Сумм. эн." (общая сумма) — возьми значение текущей сессии "Энергия".
+    Например: "Энергия 12.0kwh" -> верни 12.0.
 
-    Формат ответа ТОЛЬКО JSON:
-    {"odo": null, "kwh": 11.7, "location_type": "🏠 Дом"}
+    Верни ТОЛЬКО JSON без пояснений:
+    {"odo": null, "kwh": 12.0, "location_type": "🏠 Дом"}
     """
 
     payload = {
@@ -110,20 +114,20 @@ def analyze_photo_fast(image_bytes):
         }],
         "generationConfig": {
             "temperature": 0.1,
-            "maxOutputTokens": 100
+            "maxOutputTokens": 80
         }
     }
 
     try:
-        response = requests.post(url, json=payload, timeout=10)
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
         if response.ok:
             data = response.json()
             raw_text = data['candidates'][0]['content']['parts'][0]['text']
             return json.loads(clean_json_string(raw_text))
         else:
-            print(f"Gemini API Error: {response.status_code} {response.text}")
+            print(f"Gemini API Error {response.status_code}: {response.text}")
     except Exception as e:
-        print(f"Ошибка анализа Gemini: {e}")
+        print(f"Gemini exception: {e}")
     return None
 
 def get_main_keyboard():
@@ -158,7 +162,6 @@ def handle_photo(message):
     status_msg = bot.reply_to(message, "⚡ Считываю показатели с фото...", reply_markup=get_main_keyboard())
 
     try:
-        # Берем оптимизированное по весу превью
         photo_obj = message.photo[-2] if len(message.photo) > 1 else message.photo[-1]
         file_info = bot.get_file(photo_obj.file_id)
         file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_info.file_path}"
@@ -192,7 +195,6 @@ def handle_photo(message):
         rate_val = rates.get('night', 2.8) if 'Дом' in loc_val else (rates.get('work', 0.0) if 'Работа' in loc_val else rates.get('ez', 19.0))
         total_price = round(float(kwh_val) * float(rate_val), 2)
 
-        # Формируем запись сессии в точной структуре WebApp
         new_entry = {
             'id': str(int(datetime.utcnow().timestamp() * 1000)),
             'odo': float(odo_val),
