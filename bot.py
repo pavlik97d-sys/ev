@@ -77,14 +77,16 @@ def clean_json_string(s):
     return s.strip()
 
 def analyze_photo_fast(image_bytes):
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    
     headers = {
         "Content-Type": "application/json",
         "x-goog-api-key": GEMINI_API_KEY
     }
+    
     b64_image = base64.b64encode(image_bytes).decode('utf-8')
     
-    prompt = 'Изучи экран зарядной станции или одометр авто. Найди kwh текущей сессии (число, например 12.0), odo пробег (число) и location_type ("🏠 Дом" или "⚡ ЭЗС"). Ответь ТОЛЬКО JSON объектом: {"odo": null, "kwh": 12.0, "location_type": "🏠 Дом"}'
+    prompt = 'Найди на фото экрана зарядки или приборной панели: kwh (число текущей сессии), odo (пробег авто) и location_type ("🏠 Дом" или "⚡ ЭЗС"). Ответь ТОЛЬКО JSON: {"odo": null, "kwh": 12.0, "location_type": "🏠 Дом"}'
 
     payload = {
         "contents": [{
@@ -100,21 +102,20 @@ def analyze_photo_fast(image_bytes):
         }],
         "generationConfig": {
             "temperature": 0.1,
-            "maxOutputTokens": 80
+            "maxOutputTokens": 100
         }
     }
 
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        response = requests.post(url, headers=headers, json=payload, timeout=12)
         if response.ok:
             data = response.json()
             raw_text = data['candidates'][0]['content']['parts'][0]['text']
-            return json.loads(clean_json_string(raw_text))
+            return json.loads(clean_json_string(raw_text)), None
         else:
-            print(f"Gemini API Error {response.status_code}: {response.text}")
+            return None, f"Ошибка Gemini {response.status_code}: {response.text[:120]}"
     except Exception as e:
-        print(f"Gemini exception: {e}")
-    return None
+        return None, f"Исключение: {str(e)}"
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
@@ -152,14 +153,18 @@ def handle_photo(message):
         img_res = requests.get(file_url, timeout=8)
         
         if not img_res.ok:
-            bot.edit_message_text("❌ Ошибка загрузки фото из Telegram.", message.chat.id, status_msg.message_id)
+            bot.edit_message_text("❌ Ошибка скачивания фото из Telegram.", message.chat.id, status_msg.message_id)
             return
 
-        parsed = analyze_photo_fast(img_res.content)
+        parsed, error_detail = analyze_photo_fast(img_res.content)
+
+        if error_detail:
+            bot.edit_message_text(f"⚠️ {error_detail}", message.chat.id, status_msg.message_id)
+            return
 
         if not parsed or (parsed.get('odo') is None and parsed.get('kwh') is None):
             bot.edit_message_text(
-                "⚠️ Не удалось распознать кВт⋅ч на фото.\nСделайте снимок ближе или запишите вручную.",
+                "⚠️ Не удалось распознать цифры на экране зарядки.\nСделайте снимок ближе.",
                 message.chat.id,
                 status_msg.message_id
             )
@@ -167,7 +172,7 @@ def handle_photo(message):
 
         car = find_user_car(user_id)
         if not car:
-            bot.edit_message_text("⚠️ Автомобиль не найден в базе.", message.chat.id, status_msg.message_id)
+            bot.edit_message_text("⚠️ Автомобиль не найден в базе Supabase.", message.chat.id, status_msg.message_id)
             return
 
         logs = car.get('logs') or []
@@ -201,7 +206,7 @@ def handle_photo(message):
             markup.add(btn)
 
             bot.edit_message_text(
-                f"✅ **Сессия сохранена по фото!**\n\n"
+                f"✅ **Сессия сохранена!**\n\n"
                 f"🚗 **Авто:** {car.get('name')}\n"
                 f"🔋 **Заряжено:** +{kwh_val} кВт⋅ч\n"
                 f"📍 **Локация:** {loc_val} ({rate_val} ₽/кВт⋅ч)\n"
@@ -217,7 +222,7 @@ def handle_photo(message):
             bot.edit_message_text("❌ Ошибка сохранения в Supabase.", message.chat.id, status_msg.message_id)
 
     except Exception as e:
-        bot.edit_message_text(f"⚠️ Ошибка: {e}", message.chat.id, status_msg.message_id)
+        bot.edit_message_text(f"⚠️ Ошибка скрипта: {e}", message.chat.id, status_msg.message_id)
 
 if __name__ == '__main__':
     threading.Thread(target=run_http_server, daemon=True).start()
