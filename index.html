@@ -278,9 +278,7 @@
     const SUPABASE_REST = 'https://smxvjnlbwiaoudwlbvud.supabase.co/rest/v1/ev_cars';
     const SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2';
 
-    // Список доверенных ID (ваш новый и старый)
-    const TRUSTED_ADMIN_IDS = ['817508403', '413111884'];
-
+    // Получение текущего пользователя Telegram
     const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user || { id: '817508403', first_name: 'PavelfromSPb', username: 'PavelfromSPb' };
     const currentUserId = String(tgUser.id || '817508403');
     const currentUserName = tgUser.first_name || tgUser.username || 'Водитель';
@@ -324,13 +322,13 @@
     function getSelectedCar() {
       let c = allCars.find(c => c.id === selectedCarId);
       if (!c) c = allCars.find(c => c.name && c.name.includes('Geely')) || allCars[0] || {
-        id: 'car_817508403',
+        id: 'car_' + currentUserId,
         name: 'Geely EX5 EM-i',
         capacity: 18.7,
         rates: { night: 2.8, day: 6.5, work: 0, ez: 19.0 },
         owner_id: currentUserId,
         owner_name: currentUserName,
-        drivers: ['817508403', '413111884'],
+        drivers: [],
         logs: []
       };
       if (!c.rates) c.rates = { night: 2.8, day: 6.5, work: 0, ez: 19.0 };
@@ -338,21 +336,13 @@
       return c;
     }
 
+    // Строгая проверка прав доступа без общих списков
     function checkCanEdit(car) {
       const ownerIdStr = String(car.owner_id || car.ownerId || '');
-      const ownerNameStr = String(car.owner_name || car.ownerName || '');
-      
-      const isOwner = (
-        ownerIdStr === currentUserId ||
-        TRUSTED_ADMIN_IDS.includes(currentUserId) ||
-        ownerNameStr.toLowerCase().includes('pavel')
-      );
-
       const driversList = (car.drivers || []).map(String);
-      const isDriver = (
-        driversList.includes(currentUserId) ||
-        driversList.some(d => TRUSTED_ADMIN_IDS.includes(d))
-      );
+      
+      const isOwner = (ownerIdStr === currentUserId);
+      const isDriver = driversList.includes(currentUserId);
 
       return { isOwner, isDriver, canEdit: isOwner || isDriver };
     }
@@ -369,10 +359,10 @@
           if (Array.isArray(data) && data.length > 0) {
             allCars = data;
             
-            // Если сохраненное авто не найдено, автоматически выбираем Geely
+            // Если выбранное авто не существует или чужое, выбираем авто пользователя по умолчанию
             if (!allCars.some(c => c.id === selectedCarId)) {
-              const geely = allCars.find(c => c.name && c.name.includes('Geely'));
-              if (geely) selectedCarId = geely.id;
+              const myOwn = allCars.find(c => checkCanEdit(c).isOwner) || allCars.find(c => checkCanEdit(c).isDriver) || allCars[0];
+              if (myOwn) selectedCarId = myOwn.id;
             }
             
             if (badge) badge.innerText = 'БД OK';
@@ -396,7 +386,7 @@
         rates: car.rates,
         owner_id: String(car.owner_id || currentUserId),
         owner_name: car.owner_name || currentUserName,
-        drivers: car.drivers || ['817508403', '413111884'],
+        drivers: car.drivers || [],
         logs: car.logs || [],
         updated_at: new Date().toISOString()
       };
@@ -708,7 +698,7 @@
 
     function renderRecentLogs() {
       const car = getSelectedCar();
-      const { canEdit } = checkCanEdit(car);
+      const { canEdit, isOwner } = checkCanEdit(car);
       const container = document.getElementById('recentLogsContainer');
       const logs = car.logs || [];
 
