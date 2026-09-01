@@ -46,7 +46,7 @@
     </div>
   </div>
 
-  <!-- Уведомление для чужого авто -->
+  <!-- Уведомление для режима просмотра -->
   <div id="readOnlyNotice" class="card-clean rounded-2xl p-3 border-slate-200 bg-slate-50 hidden">
     <div class="flex items-center gap-2 text-xs font-medium text-slate-600">
       <span>🔒</span> Это профиль другого водителя. Доступен просмотр аналитики и экспорт.
@@ -204,7 +204,7 @@
           <input id="carDriversInput" type="text" placeholder="Напр. 123456789, 987654321" class="w-full bg-blue-50/50 border border-blue-200 rounded-xl p-2 text-xs outline-none focus:border-blue-500 mt-1">
           <p class="text-[9px] text-slate-400 mt-1">Укажите цифровые Telegram ID тех, кому разрешено вносить зарядки в вашу машину (через запятую).</p>
           <div class="mt-1 bg-slate-50 border border-slate-200 p-1.5 rounded-lg text-[9px] text-slate-500 flex justify-between items-center">
-            <span>Ваш Telegram ID: <b id="my-tg-id-text" class="text-slate-800">--</b></span>
+            <span>Ваш ID: <b id="my-tg-id-text" class="text-slate-800">--</b></span>
             <button onclick="copyMyId()" class="text-blue-600 font-bold hover:underline">Скопировать</button>
           </div>
         </div>
@@ -278,11 +278,27 @@
     const SUPABASE_REST = 'https://smxvjnlbwiaoudwlbvud.supabase.co/rest/v1/ev_cars';
     const SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2';
 
-    const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user || { id: '817508403', first_name: 'PavelfromSPb', username: 'PavelfromSPb' };
-    const currentUserId = String(tgUser.id || '817508403');
-    const currentUserName = tgUser.first_name || tgUser.username || 'Водитель';
+    // 1. Определение пользователя: из Telegram WebApp или через URL-параметр ?uid=...
+    const urlParams = new URLSearchParams(window.location.search);
+    const paramUid = urlParams.get('uid');
+    const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
 
-    // Очищаем старый кэш списка машин при открытии
+    let currentUserId = '';
+    let currentUserName = 'Гость';
+
+    if (tgUser && tgUser.id) {
+      currentUserId = String(tgUser.id);
+      currentUserName = tgUser.first_name || tgUser.username || 'Водитель';
+    } else if (paramUid) {
+      currentUserId = String(paramUid);
+      currentUserName = 'Водитель (' + paramUid + ')';
+    } else {
+      // Дефолтный ID владельца при прямом открытии сайта
+      currentUserId = '817508403';
+      currentUserName = 'PavelfromSPb';
+    }
+
+    // Сброс старого кэша
     localStorage.removeItem('ev_global_cars');
 
     let allCars = [];
@@ -323,7 +339,7 @@
 
     function getSelectedCar() {
       let c = allCars.find(c => c.id === selectedCarId);
-      if (!c) c = allCars.find(c => c.name && c.name.includes('Geely')) || allCars[0] || {
+      if (!c) c = allCars.find(c => checkCanEdit(c).isOwner) || allCars[0] || {
         id: 'car_' + currentUserId,
         name: 'Geely EX5 EM-i',
         capacity: 18.7,
@@ -338,9 +354,9 @@
       return c;
     }
 
-    // Строгая проверка прав: только по ID
+    // Строгое разграничение прав доступа
     function checkCanEdit(car) {
-      const myId = String(tgUser?.id || '');
+      const myId = String(currentUserId || '');
       const carOwnerId = String(car?.owner_id || car?.ownerId || '');
       const driversList = Array.isArray(car?.drivers) ? car.drivers.map(String) : [];
 
@@ -362,7 +378,7 @@
           if (Array.isArray(data) && data.length > 0) {
             allCars = data;
             
-            // Если выбранное авто не существует или чужое, выбираем свое авто
+            // Если сохраненное авто не найдено, выбираем авто текущего пользователя
             if (!allCars.some(c => c.id === selectedCarId)) {
               const myOwn = allCars.find(c => checkCanEdit(c).isOwner) || allCars.find(c => checkCanEdit(c).isDriver) || allCars[0];
               if (myOwn) selectedCarId = myOwn.id;
@@ -873,7 +889,7 @@
       haptic('success');
       const data = generateReportPayload();
       const botToken = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU';
-      const chatId = tgUser.id;
+      const chatId = tgUser?.id || (currentUserId !== 'guest' ? currentUserId : null);
       if (!chatId) { notify('Откройте WebApp в Telegram.'); return; }
 
       fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -943,7 +959,7 @@
       }
     }
 
-    // Запуск
+    // Инициализация
     initChart();
     updateCatalogUI();
     restoreLastRate();
