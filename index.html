@@ -75,7 +75,7 @@
 
     <!-- Кнопки фото -->
     <div>
-      <label class="text-[10px] uppercase font-bold text-slate-400 mb-1.5 block">2. Сделайте фото дисплея (кВт⋅ч и длительность считываются сами):</label>
+      <label class="text-[10px] uppercase font-bold text-slate-400 mb-1.5 block">2. Сделайте фото дисплея (быстрое считывание за 1-2 сек):</label>
       <div class="grid grid-cols-2 gap-2">
         <input id="cameraInput" type="file" accept="image/*" capture="environment" class="hidden" onchange="handleWebPhotoUpload(this, 'camera')">
         <input id="galleryInput" type="file" accept="image/*" class="hidden" onchange="handleWebPhotoUpload(this, 'gallery')">
@@ -363,8 +363,8 @@
       return { isOwner, isDriver, canEdit: isOwner || isDriver };
     }
 
-    // Сжатие изображения
-    function compressImage(file, maxWidth = 1200, quality = 0.8) {
+    // Быстрое сжатие фото (до 800px, 70-120 КБ) для мгновенной передачи в OCR
+    function compressImage(file, maxWidth = 800, quality = 0.7) {
       return new Promise((resolve) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
@@ -390,11 +390,13 @@
               resolve(blob);
             }, 'image/jpeg', quality);
           };
+          img.onerror = () => resolve(file);
         };
+        reader.onerror = () => resolve(file);
       });
     }
 
-    // Точная дата и время съемки из EXIF-метаданных фото
+    // Точная дата и время съемки из EXIF-метаданных файла
     function extractDateFromImage(file) {
       return new Promise((resolve) => {
         try {
@@ -437,7 +439,7 @@
       });
     }
 
-    // Обработка фото: дата/время снимка + распознавание кВт*ч и продолжительности зарядки
+    // Распознавание фото с быстрым откликом и парсингом времени
     async function handleWebPhotoUpload(input, source) {
       const car = getSelectedCar();
       const { canEdit } = checkCanEdit(car);
@@ -454,47 +456,47 @@
       const defaultText = source === 'camera' ? 'Снять на камеру' : 'Из галереи';
       const btnText = document.getElementById(btnId);
       
-      btnText.innerText = '⏳ Анализирую дисплей...';
+      btnText.innerText = '⚡ Чтение (1-2 сек)...';
       haptic('medium');
 
       try {
-        // 1. Дата и время момента съемки фото
-        const photoDate = await extractDateFromImage(file);
-
-        // 2. Сжимаем фото для OCR
-        const compressedBlob = await compressImage(file, 1200, 0.8);
+        const [photoDate, compressedBlob] = await Promise.all([
+          extractDateFromImage(file),
+          compressImage(file, 800, 0.7)
+        ]);
 
         const formData = new FormData();
-        formData.append('file', compressedBlob, 'charge.jpg');
+        formData.append('file', compressedBlob, 'c.jpg');
         formData.append('apikey', OCR_API_KEY);
         formData.append('language', 'rus');
-        formData.append('OCREngine', '2');
-        formData.append('scale', 'true');
+        formData.append('OCREngine', '1');
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
 
         const res = await fetch('https://api.ocr.space/parse/image', {
           method: 'POST',
-          body: formData
+          body: formData,
+          signal: controller.signal
         });
+        clearTimeout(timeoutId);
+
         const data = await res.json();
         
         if (data.ParsedResults && data.ParsedResults.length > 0) {
           const text = data.ParsedResults[0].ParsedText.replace(',', '.');
 
-          // Поиск количества энергии (кВт·ч)
+          // Поиск количества кВт·ч
           let matchKwh = text.match(/(?:энергия|сумм[\.\s]*эн|energy)[\s:]*([0-9]+(?:\.[0-9]+)?)/i);
           if (!matchKwh) matchKwh = text.match(/([0-9]+(?:\.[0-9]+)?)\s*(?:kwh|квт)/i);
           if (!matchKwh) matchKwh = text.match(/([0-9]+\.[0-9]+)/);
 
-          // Поиск продолжительности зарядки на экране (например, Время: 4:48:12)
+          // Поиск продолжительности зарядки на дисплее (например, Время: 4:48:12)
           let matchDuration = text.match(/(?:время|time)[\s:]*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)/i);
           let durationStr = '';
           if (matchDuration && matchDuration[1]) {
             const tParts = matchDuration[1].split(':');
-            if (tParts.length === 3) {
-              durationStr = `${parseInt(tParts[0])}ч ${tParts[1]}м`;
-            } else if (tParts.length === 2) {
-              durationStr = `${parseInt(tParts[0])}ч ${tParts[1]}м`;
-            }
+            durationStr = `${parseInt(tParts[0])}ч ${tParts[1]}м`;
           }
 
           if (matchKwh && matchKwh[1]) {
@@ -506,15 +508,14 @@
               kwh: kwhVal,
               rate: activeRateValue,
               location: activeLocation,
-              duration: durationStr, // Длительность процесса зарядки со станции
+              duration: durationStr,
               totalPrice: totalPrice,
               price: totalPrice,
               author: currentUserName,
               author_id: currentUserId,
-              date: photoDate.toISOString() // Точная дата и время съемки
+              date: photoDate.toISOString()
             });
 
-            // Сортировка записей по дате
             car.logs.sort((a, b) => new Date(a.date) - new Date(b.date));
 
             haptic('success');
@@ -524,16 +525,20 @@
 
             const dateStr = photoDate.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
             const timeStr = photoDate.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-            const durationLabel = durationStr ? `\n⏱️ Заряжалось: ${durationStr}` : '';
-            notify(`✅ Записано: +${kwhVal} кВт⋅ч (${Math.round(totalPrice)} ₽)\n📅 Завершено: ${dateStr}, ${timeStr}${durationLabel}`);
+            const durTag = durationStr ? `\n⏱️ Заряжалось: ${durationStr}` : '';
+            notify(`✅ Записано: +${kwhVal} кВт⋅ч (${Math.round(totalPrice)} ₽)\n📅 ${dateStr}, ${timeStr}${durTag}`);
           } else {
             notify('⚠️ Цифры кВт⋅ч не найдены. Сфотографируйте дисплей ближе.');
           }
         } else {
-          notify('⚠️ Сервер OCR не смог распознать текст с дисплея.');
+          notify('⚠️ Сервер OCR перегружен. Попробуйте еще раз.');
         }
       } catch (e) {
-        notify('❌ Ошибка связи: ' + e.message);
+        if (e.name === 'AbortError') {
+          notify('⚠️ Превышено время ожидания ответа OCR. Попробуйте снова.');
+        } else {
+          notify('❌ Ошибка связи: ' + e.message);
+        }
       } finally {
         btnText.innerText = defaultText;
         input.value = '';
@@ -1076,7 +1081,7 @@
       }
     }
 
-    // Запуск
+    // Запуск приложения
     initChart();
     updateCatalogUI();
     render();
