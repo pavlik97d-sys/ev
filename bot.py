@@ -3,6 +3,7 @@ import os
 import re
 import time
 import json
+import base64
 import threading
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -24,11 +25,95 @@ bot = telebot.TeleBot(TOKEN, threaded=True)
 PENDING_SESSIONS = {}
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
+    def _set_cors_headers(self):
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self._set_cors_headers()
+        self.end_headers()
+
     def do_GET(self):
         self.send_response(200)
+        self._set_cors_headers()
         self.send_header('Content-type', 'text/plain')
         self.end_headers()
         self.wfile.write(b"OK")
+
+    def do_POST(self):
+        if self.path == '/api/ocr':
+            content_length = int(self.headers.get('Content-Length', 0))
+            post_data = self.rfile.read(content_length)
+
+            try:
+                body = json.loads(post_data.decode('utf-8'))
+                base64_image = body.get('base64Image')
+
+                if not base64_image:
+                    self.send_response(400)
+                    self._set_cors_headers()
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'error': 'No image provided'}).encode('utf-8'))
+                    return
+
+                # Прямой запрос из Франкфурта к OCR без ограничений РФ
+                payload = {
+                    'base64Image': base64_image,
+                    'apikey': OCR_API_KEY,
+                    'language': 'rus',
+                    'OCREngine': '1'
+                }
+                ocr_res = requests.post('https://api.ocr.space/parse/image', data=payload, timeout=20)
+                ocr_data = ocr_res.json()
+
+                if ocr_data.get('IsErroredOnProcessing') or not ocr_data.get('ParsedResults'):
+                    self.send_response(422)
+                    self._set_cors_headers()
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'error': 'OCR parse error'}).encode('utf-8'))
+                    return
+
+                text = ocr_data['ParsedResults'][0].get('ParsedText', '').replace(',', '.')
+
+                # 1. Поиск кВт⋅ч
+                kwh_match = re.search(r'(?:энергия|сумм[\.\s]*эн|energy)[\s:]*([0-9]+(?:\.[0-9]+)?)', text, re.I)
+                if not kwh_match:
+                    kwh_match = re.search(r'([0-9]+(?:\.[0-9]+)?)\s*(?:kwh|квт)', text, re.I)
+                if not kwh_match:
+                    kwh_match = re.search(r'([0-9]+\.[0-9]+)', text)
+
+                # 2. Поиск времени
+                dur_match = re.search(r'(?:время|time)[\s:]*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)', text, re.I)
+                duration_str = ''
+                if dur_match:
+                    parts = dur_match.group(1).split(':')
+                    duration_str = f"{int(parts[0])}ч {parts[1]}м"
+
+                resp_payload = {
+                    'kwh': kwh_match.group(1) if kwh_match else None,
+                    'duration': duration_str
+                }
+
+                self.send_response(200)
+                self._set_cors_headers()
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(resp_payload).encode('utf-8'))
+
+            except Exception as e:
+                self.send_response(500)
+                self._set_cors_headers()
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+        else:
+            self.send_response(404)
+            self._set_cors_headers()
+            self.end_headers()
 
     def log_message(self, format, *args):
         pass
