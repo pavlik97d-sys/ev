@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>EV Garage & Analytics</title>
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
@@ -18,7 +17,6 @@
   </style>
 </head>
 <body class="p-3.5 select-none min-h-screen pb-14 space-y-3">
-  <script>try{ window.Telegram?.WebApp?.expand(); }catch(e){}</script>
 
   <!-- 1. Каталог авто -->
   <div class="card-clean rounded-2xl p-3.5">
@@ -57,12 +55,12 @@
   <div id="chargeFormCard" class="card-clean rounded-2xl p-4 space-y-3 border-blue-100 bg-gradient-to-b from-blue-50/30 to-white shadow-sm">
     <div class="flex items-center justify-between">
       <div class="text-xs font-bold uppercase tracking-wider text-blue-700 flex items-center gap-1.5">
-        <span>⚡</span> Экспресс-зарядка по фото
+        <span>⚡</span> Экспресс-зарядка
       </div>
       <span id="form-car-name" class="text-[10px] bg-white border border-blue-200 text-blue-700 font-bold px-2 py-0.5 rounded-md">Авто</span>
     </div>
 
-    <!-- Выбор тарифа -->
+    <!-- Шаг 1: Выбор тарифа -->
     <div>
       <div class="flex justify-between items-center mb-1">
         <label class="text-[10px] uppercase font-bold text-slate-400 block">1. Выберите тариф:</label>
@@ -71,42 +69,33 @@
       <div id="presetsContainer" class="flex gap-1.5 overflow-x-auto py-0.5"></div>
     </div>
 
-    <!-- Кнопки фото -->
-    <div>
-      <label class="text-[10px] uppercase font-bold text-slate-400 mb-1.5 block">2. Сделайте фото дисплея станции:</label>
-      <div class="grid grid-cols-2 gap-2">
-        <input id="cameraInput" type="file" accept="image/*" capture="environment" class="hidden" onchange="handleWebPhotoUpload(this, 'camera')">
-        <input id="galleryInput" type="file" accept="image/*" class="hidden" onchange="handleWebPhotoUpload(this, 'gallery')">
-
-        <button type="button" onclick="document.getElementById('cameraInput').click()" class="accent-blue text-white active:scale-[0.98] py-3 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20">
-          <span>📷</span> <span id="camera-btn-text">Снять на камеру</span>
-        </button>
-
-        <button type="button" onclick="document.getElementById('galleryInput').click()" class="bg-indigo-600 hover:bg-indigo-700 text-white active:scale-[0.98] py-3 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-md shadow-indigo-500/20">
-          <span>🖼️</span> <span id="gallery-btn-text">Из галереи</span>
+    <!-- Шаг 2: Ввод кВт⋅ч (быстро и без зависаний) -->
+    <div class="pt-1">
+      <label class="text-[10px] uppercase font-bold text-slate-400 mb-1 block">2. Заряжено энергии:</label>
+      <div class="flex gap-2">
+        <input id="kwh" type="number" step="any" placeholder="кВт⋅ч (напр. 14.5)" class="flex-1 bg-white border-2 border-blue-200 rounded-xl p-3 text-base font-black text-slate-800 outline-none focus:border-blue-500 shadow-inner">
+        <button onclick="saveFastData()" class="accent-blue text-white px-5 rounded-xl text-xs font-bold active:scale-95 transition shadow-md shadow-blue-500/20 whitespace-nowrap flex items-center gap-1.5">
+          <span>💾</span> Записать
         </button>
       </div>
     </div>
 
-    <!-- Ручной ввод -->
-    <details class="text-[11px] text-slate-500 pt-1">
-      <summary class="cursor-pointer font-bold text-blue-600 hover:underline">✏️ Или ввести вручную</summary>
-      <div class="mt-2.5 pt-2.5 border-t border-slate-100 space-y-2">
-        <div class="grid grid-cols-2 gap-2">
-          <div>
-            <label class="text-[10px] font-bold text-slate-400">Заряжено (кВт⋅ч):</label>
-            <input id="kwh" type="number" step="any" placeholder="14.5" class="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs font-bold text-slate-800 outline-none focus:border-blue-500">
-          </div>
-          <div>
-            <label class="text-[10px] font-bold text-slate-400">Тариф (₽):</label>
-            <input id="rate" type="number" step="any" placeholder="2.8" class="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs font-bold text-slate-800 outline-none focus:border-blue-500">
-          </div>
-        </div>
-        <button onclick="saveManualData()" class="w-full bg-slate-800 text-white py-2 rounded-xl text-xs font-bold active:scale-95 transition">
-          💾 Записать вручную
+    <!-- Шаг 3: Автосчитывание по фото (опционально) -->
+    <div class="pt-1 border-t border-slate-100">
+      <label class="text-[10px] uppercase font-bold text-slate-400 mb-1.5 block">Или распознать по фото экрана:</label>
+      <div class="grid grid-cols-2 gap-2">
+        <input id="cameraInput" type="file" accept="image/*" capture="environment" class="hidden" onchange="handleWebPhotoUpload(this, 'camera')">
+        <input id="galleryInput" type="file" accept="image/*" class="hidden" onchange="handleWebPhotoUpload(this, 'gallery')">
+
+        <button type="button" onclick="document.getElementById('cameraInput').click()" class="bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 active:scale-[0.98] py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm">
+          <span>📷</span> <span id="camera-btn-text">Снять на камеру</span>
+        </button>
+
+        <button type="button" onclick="document.getElementById('galleryInput').click()" class="bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 active:scale-[0.98] py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm">
+          <span>🖼️</span> <span id="gallery-btn-text">Из галереи</span>
         </button>
       </div>
-    </details>
+    </div>
   </div>
 
   <!-- 3. Фильтры аналитики -->
@@ -122,7 +111,7 @@
     </select>
   </div>
 
-  <!-- 4. Карточки показателей -->
+  <!-- 4. Карточки ключевых показателей -->
   <div class="grid grid-cols-2 gap-2.5">
     <div class="card-clean rounded-2xl p-3.5 border-l-4 border-emerald-500">
       <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">💰 Затраты</div>
@@ -157,14 +146,14 @@
   <div class="card-clean rounded-2xl p-4">
     <div class="text-xs font-bold uppercase tracking-wider text-slate-700 mb-2.5 flex items-center justify-between">
       <span>🕒 Журнал зарядок</span>
-      <span class="text-[10px] text-slate-400 font-normal">С датой и длительностью</span>
+      <span class="text-[10px] text-slate-400 font-normal">С датой и временем</span>
     </div>
     <div id="recentLogsContainer" class="space-y-2"></div>
   </div>
 
-  <!-- 7. Нижняя панель действий -->
+  <!-- 7. Панель действий -->
   <div class="grid grid-cols-4 gap-2 text-[11px] font-medium text-center">
-    <button onclick="haptic('medium'); fetchFromCloud();" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-slate-600">
+    <button onclick="fetchFromCloud();" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-slate-600">
       🔄 <span>Обновить</span>
     </button>
     <button onclick="openExportModal()" class="card-clean p-2.5 rounded-xl hover:bg-slate-50 active:scale-95 transition flex flex-col items-center gap-1 text-blue-600">
@@ -244,13 +233,8 @@
       </div>
       <div id="reportContent" class="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-xl p-3 mb-3 leading-relaxed"></div>
       <div class="space-y-2">
-        <button onclick="sendReportToBot()" class="w-full accent-blue text-white py-2.5 rounded-xl text-xs font-bold active:scale-95 transition flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20">
-          <span>📩</span> Отправить отчет в чат Telegram
-        </button>
-        <div class="flex gap-2">
-          <button onclick="copyReportText()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2 rounded-xl text-xs font-bold">📋 Скопировать</button>
-          <button onclick="closeReportModal()" class="px-4 bg-slate-100 text-slate-600 py-2.5 rounded-xl text-xs font-bold">Закрыть</button>
-        </div>
+        <button onclick="copyReportText()" class="w-full accent-blue text-white py-2.5 rounded-xl text-xs font-bold active:scale-95 transition">📋 Скопировать отчет</button>
+        <button onclick="closeReportModal()" class="w-full bg-slate-100 text-slate-600 py-2 rounded-xl text-xs font-bold">Закрыть</button>
       </div>
     </div>
   </div>
@@ -277,26 +261,14 @@
 
     const urlParams = new URLSearchParams(window.location.search);
     const paramUid = urlParams.get('uid');
-    const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
 
-    let currentUserId = '';
-    let currentUserName = 'Гость';
-
-    if (tgUser && tgUser.id) {
-      currentUserId = String(tgUser.id);
-      currentUserName = tgUser.first_name || tgUser.username || 'Водитель';
-    } else if (paramUid) {
-      currentUserId = String(paramUid);
-      currentUserName = 'Водитель (' + paramUid + ')';
-    } else {
-      currentUserId = '817508403';
-      currentUserName = 'PavelfromSPb';
-    }
+    let currentUserId = paramUid || '817508403';
+    let currentUserName = paramUid === '413111884' ? 'Georgy' : (paramUid === '953386088' ? 'Julia' : 'PavelfromSPb');
 
     localStorage.removeItem('ev_global_cars');
 
     let allCars = [];
-    let selectedCarId = localStorage.getItem('ev_active_car_id') || 'car_817508403';
+    let selectedCarId = localStorage.getItem('ev_active_car_id') || ('car_' + currentUserId);
     let selectedPresetKey = localStorage.getItem('ev_selected_preset_key') || 'night';
     let activeRateValue = 2.8;
     let activeLocation = '🏠 Дом';
@@ -304,26 +276,9 @@
     let chartMode = 'weekday';
     let chartInstance = null;
 
-    function notify(msg) {
-      try {
-        if (window.Telegram?.WebApp?.showAlert) window.Telegram.WebApp.showAlert(msg);
-        else alert(msg);
-      } catch(e) { alert(msg); }
-    }
-
-    function haptic(type) {
-      try {
-        if (window.Telegram?.WebApp?.HapticFeedback) {
-          if (type === 'light') Telegram.WebApp.HapticFeedback.impactOccurred('light');
-          if (type === 'medium') Telegram.WebApp.HapticFeedback.impactOccurred('medium');
-          if (type === 'success') Telegram.WebApp.HapticFeedback.notificationOccurred('success');
-          if (type === 'warning') Telegram.WebApp.HapticFeedback.notificationOccurred('warning');
-        }
-      } catch(e){}
-    }
+    function notify(msg) { alert(msg); }
 
     function copyMyId() {
-      haptic('success');
       navigator.clipboard.writeText(currentUserId).then(() => {
         notify(`Ваш ID скопирован: ${currentUserId}`);
       });
@@ -361,159 +316,31 @@
       return { isOwner, isDriver, canEdit: isOwner || isDriver };
     }
 
-    // Мгновенное сжатие в DataURL (Base64) без зависания мобильного браузера
-    function compressImageToBase64(file) {
-      return new Promise((resolve) => {
-        const img = new Image();
-        const url = URL.createObjectURL(file);
-        img.src = url;
-        img.onload = () => {
-          URL.revokeObjectURL(url);
-          const maxDim = 800;
-          let w = img.width;
-          let h = img.height;
-          if (w > maxDim || h > maxDim) {
-            if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
-            else { w = Math.round((w * maxDim) / h); h = maxDim; }
-          }
-          const canvas = document.createElement('canvas');
-          canvas.width = w;
-          canvas.height = h;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, w, h);
-          resolve(canvas.toDataURL('image/jpeg', 0.65));
-        };
-        img.onerror = () => {
-          URL.revokeObjectURL(url);
-          const reader = new FileReader();
-          reader.onload = (e) => resolve(e.target.result);
-          reader.readAsDataURL(file);
-        };
-      });
-    }
-
-    // Распознавание через base64Image (стабильно, быстро и без CORS-зависаний)
-    async function handleWebPhotoUpload(input, source) {
+    // Мгновенная запись кВт*ч по кнопке
+    async function saveFastData() {
       const car = getSelectedCar();
       const { canEdit } = checkCanEdit(car);
       if (!canEdit) {
         notify('⛔ У вас нет прав на добавление сессий в этот профиль!');
-        input.value = '';
         return;
       }
 
-      const file = input.files?.[0];
-      if (!file) return;
+      const kwhInput = document.getElementById('kwh');
+      const kwhVal = parseFloat(kwhInput.value);
 
-      const btnId = source === 'camera' ? 'camera-btn-text' : 'gallery-btn-text';
-      const defaultText = source === 'camera' ? 'Снять на камеру' : 'Из галереи';
-      const btnText = document.getElementById(btnId);
-
-      btnText.innerText = '⏳ Сжатие...';
-      haptic('medium');
-
-      const photoDate = file.lastModified ? new Date(file.lastModified) : new Date();
-
-      try {
-        const base64Data = await compressImageToBase64(file);
-        btnText.innerText = '⚡ Распознавание...';
-
-        const formData = new FormData();
-        formData.append('base64Image', base64Data);
-        formData.append('apikey', OCR_API_KEY);
-        formData.append('language', 'rus');
-        formData.append('OCREngine', '1');
-
-        const res = await fetch('https://api.ocr.space/parse/image', {
-          method: 'POST',
-          body: formData
-        });
-
-        const data = await res.json();
-
-        if (data.IsErroredOnProcessing) {
-          throw new Error(data.ErrorMessage?.[0] || 'Ошибка обработки OCR');
-        }
-
-        if (data.ParsedResults && data.ParsedResults.length > 0) {
-          const text = data.ParsedResults[0].ParsedText.replace(',', '.');
-
-          let matchKwh = text.match(/(?:энергия|сумм[\.\s]*эн|energy)[\s:]*([0-9]+(?:\.[0-9]+)?)/i);
-          if (!matchKwh) matchKwh = text.match(/([0-9]+(?:\.[0-9]+)?)\s*(?:kwh|квт)/i);
-          if (!matchKwh) matchKwh = text.match(/([0-9]+\.[0-9]+)/);
-
-          let matchDuration = text.match(/(?:время|time)[\s:]*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)/i);
-          let durationStr = '';
-          if (matchDuration && matchDuration[1]) {
-            const tParts = matchDuration[1].split(':');
-            durationStr = `${parseInt(tParts[0])}ч ${tParts[1]}м`;
-          }
-
-          if (matchKwh && matchKwh[1]) {
-            const kwhVal = parseFloat(matchKwh[1]);
-            const totalPrice = parseFloat((kwhVal * activeRateValue).toFixed(2));
-
-            if (!car.logs) car.logs = [];
-            car.logs.push({
-              kwh: kwhVal,
-              rate: activeRateValue,
-              location: activeLocation,
-              duration: durationStr,
-              totalPrice: totalPrice,
-              price: totalPrice,
-              author: currentUserName,
-              author_id: currentUserId,
-              date: photoDate.toISOString()
-            });
-
-            car.logs.sort((a, b) => new Date(a.date) - new Date(b.date));
-
-            haptic('success');
-            render();
-            populateMonthSelect();
-            await syncCarToCloud(car);
-
-            const dateStr = photoDate.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
-            const timeStr = photoDate.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-            const durTag = durationStr ? `\n⏱️ Заряжалось: ${durationStr}` : '';
-            notify(`✅ Записано: +${kwhVal} кВт⋅ч (${Math.round(totalPrice)} ₽)\n📅 ${dateStr}, ${timeStr}${durTag}`);
-          } else {
-            notify('⚠️ Цифры кВт⋅ч не найдены. Сфотографируйте дисплей ближе.');
-          }
-        } else {
-          notify('⚠️ Сервер не смог распознать символы на фото.');
-        }
-      } catch (e) {
-        notify('❌ Ошибка OCR: ' + e.message);
-      } finally {
-        btnText.innerText = defaultText;
-        input.value = '';
-      }
-    }
-
-    async function saveManualData() {
-      const car = getSelectedCar();
-      const { canEdit } = checkCanEdit(car);
-      if (!canEdit) {
-        notify('⛔ У вас нет прав на добавление сессий!');
-        return;
-      }
-
-      const kwh = parseFloat(document.getElementById('kwh').value);
-      const rate = parseFloat(document.getElementById('rate').value || activeRateValue);
-
-      if (!kwh || isNaN(kwh) || kwh <= 0) {
+      if (!kwhVal || isNaN(kwhVal) || kwhVal <= 0) {
         notify('Укажите количество кВт⋅ч!');
+        kwhInput.focus();
         return;
       }
 
-      const totalPrice = parseFloat((kwh * rate).toFixed(2));
+      const totalPrice = parseFloat((kwhVal * activeRateValue).toFixed(2));
       const now = new Date();
 
       if (!car.logs) car.logs = [];
       car.logs.push({
-        kwh: kwh,
-        rate: rate,
+        kwh: kwhVal,
+        rate: activeRateValue,
         location: activeLocation,
         totalPrice: totalPrice,
         price: totalPrice,
@@ -524,24 +351,106 @@
 
       car.logs.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-      document.getElementById('kwh').value = '';
-      haptic('success');
+      kwhInput.value = '';
       render();
       populateMonthSelect();
       await syncCarToCloud(car);
-      notify(`✅ Записано: +${kwh} кВт⋅ч (${Math.round(totalPrice)} ₽)`);
+
+      const timeStr = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+      notify(`✅ Записано: +${kwhVal} кВт⋅ч (${Math.round(totalPrice)} ₽) в ${timeStr}`);
+    }
+
+    // Обработка фото с жестким контролем времени (макс 6 сек)
+    async function handleWebPhotoUpload(input, source) {
+      const file = input.files?.[0];
+      if (!file) return;
+
+      const btnId = source === 'camera' ? 'camera-btn-text' : 'gallery-btn-text';
+      const defaultText = source === 'camera' ? 'Снять на камеру' : 'Из галереи';
+      const btnText = document.getElementById(btnId);
+
+      btnText.innerText = '⚡ Чтение...';
+
+      // Извлекаем точную дату съемки из файла
+      const photoDate = file.lastModified ? new Date(file.lastModified) : new Date();
+
+      // Сжимаем
+      const base64Data = await new Promise((resolve) => {
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.src = url;
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          const maxDim = 600;
+          let w = img.width, h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+            else { w = Math.round((w * maxDim) / h); h = maxDim; }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', 0.6));
+        };
+        img.onerror = () => resolve(null);
+      });
+
+      if (!base64Data) {
+        btnText.innerText = defaultText;
+        return;
+      }
+
+      try {
+        const formData = new FormData();
+        formData.append('base64Image', base64Data);
+        formData.append('apikey', OCR_API_KEY);
+        formData.append('language', 'rus');
+        formData.append('OCREngine', '1');
+
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 6000); // Строго 6 секунд!
+
+        const res = await fetch('https://api.ocr.space/parse/image', {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal
+        });
+        clearTimeout(timer);
+
+        const data = await res.json();
+
+        if (data.ParsedResults && data.ParsedResults.length > 0) {
+          const text = data.ParsedResults[0].ParsedText.replace(',', '.');
+          let match = text.match(/(?:энергия|сумм[\.\s]*эн|energy)[\s:]*([0-9]+(?:\.[0-9]+)?)/i);
+          if (!match) match = text.match(/([0-9]+(?:\.[0-9]+)?)\s*(?:kwh|квт)/i);
+          if (!match) match = text.match(/([0-9]+\.[0-9]+)/);
+
+          if (match && match[1]) {
+            document.getElementById('kwh').value = match[1];
+            notify(`✅ Распознано: ${match[1]} кВт⋅ч. Нажмите «Записать»!`);
+            return;
+          }
+        }
+        notify('⚠️ Цифры не распознаны. Введите кВт⋅ч в поле выше.');
+      } catch(e) {
+        // Если провайдер заблокировал запрос к OCR — не висим, а сразу просим ввести кВт*ч
+        const manualKwh = prompt('Связь с сервером OCR ограничена провайдером.\nСколько кВт⋅ч на дисплее?');
+        if (manualKwh) {
+          document.getElementById('kwh').value = manualKwh.replace(',', '.');
+          saveFastData();
+        }
+      } finally {
+        btnText.innerText = defaultText;
+        input.value = '';
+      }
     }
 
     function applyPreset(rateVal, loc, key) {
-      haptic('light');
       selectedPresetKey = key;
       activeRateValue = rateVal;
       activeLocation = loc;
       localStorage.setItem('ev_selected_preset_key', key);
-
-      document.getElementById('rate').value = rateVal;
       document.getElementById('active-rate-indicator').innerText = `${rateVal} ₽ / кВт⋅ч (${loc.replace(/[^а-яА-ЯёЁa-zA-Z]/g, '').trim()})`;
-
       renderPresetButtons();
     }
 
@@ -555,7 +464,6 @@
       else if (selectedPresetKey === 'ez') { activeRateValue = r.ez; activeLocation = '⚡ ЭЗС'; }
       else if (selectedPresetKey === 'free') { activeRateValue = 0; activeLocation = '🎁 Другое'; }
 
-      document.getElementById('rate').value = activeRateValue;
       document.getElementById('active-rate-indicator').innerText = `${activeRateValue} ₽ / кВт⋅ч (${activeLocation.replace(/[^а-яА-ЯёЁa-zA-Z]/g, '').trim()})`;
 
       document.getElementById('presetsContainer').innerHTML = `
@@ -578,12 +486,10 @@
           const data = await res.json();
           if (Array.isArray(data) && data.length > 0) {
             allCars = data;
-            
             if (!allCars.some(c => c.id === selectedCarId)) {
-              const myOwn = allCars.find(c => checkCanEdit(c).isOwner) || allCars.find(c => checkCanEdit(c).isDriver) || allCars[0];
+              const myOwn = allCars.find(c => checkCanEdit(c).isOwner) || allCars[0];
               if (myOwn) selectedCarId = myOwn.id;
             }
-            
             if (badge) badge.innerText = 'БД OK';
             updateCatalogUI();
             render();
@@ -622,10 +528,7 @@
           body: JSON.stringify(payload)
         });
         if (res.ok && badge) badge.innerText = 'БД OK';
-        else if (badge) badge.innerText = 'ЛОКАЛЬНО';
-      } catch(e) {
-        if (badge) badge.innerText = 'ЛОКАЛЬНО';
-      }
+      } catch(e) {}
     }
 
     function populateMonthSelect() {
@@ -649,7 +552,6 @@
     }
 
     function setFilter(filterType) {
-      haptic('light');
       currentFilter = filterType;
       document.getElementById('btn-filter-all').className = `filter-btn px-3 py-1.5 rounded-xl text-[11px] font-bold border transition whitespace-nowrap ${filterType === 'all' ? 'filter-btn-active' : 'bg-slate-50 text-slate-600 border-slate-200'}`;
       document.getElementById('btn-filter-current').className = `filter-btn px-3 py-1.5 rounded-xl text-[11px] font-bold border transition whitespace-nowrap ${filterType === 'current' ? 'filter-btn-active' : 'bg-slate-50 text-slate-600 border-slate-200'}`;
@@ -667,7 +569,6 @@
     }
 
     function toggleChartMode() {
-      haptic('light');
       chartMode = chartMode === 'weekday' ? 'season' : 'weekday';
       document.getElementById('chart-header-title').innerText = chartMode === 'weekday' ? '📊 ДНИ НЕДЕЛИ' : '📊 СЕЗОННОСТЬ РАСХОДА';
       renderChart();
@@ -737,7 +638,6 @@
     }
 
     function selectCar(id) {
-      haptic('light');
       selectedCarId = id;
       localStorage.setItem('ev_active_car_id', selectedCarId);
       updateCatalogUI();
@@ -745,7 +645,6 @@
     }
 
     function handleCarAction() {
-      haptic('medium');
       const myCar = getUserCar() || getSelectedCar();
       const modal = document.getElementById('carModal');
       const title = document.getElementById('modalTitle');
@@ -872,14 +771,13 @@
         const timeStr = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
         const cost = Math.round(item.totalPrice || item.price || 0);
         const loc = item.location || '⚡ Зарядка';
-        const durationTag = item.duration ? ` • ⏱️ ${item.duration}` : '';
         const driverName = item.author ? ` • 👤 ${item.author}` : '';
 
         return `
           <div class="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-xl text-xs">
             <div>
               <div class="font-bold text-slate-800">${loc} +${item.kwh} кВт⋅ч <span class="text-blue-600 font-bold">(${cost} ₽)</span></div>
-              <div class="text-[10px] text-slate-400">📅 ${dateStr} в ${timeStr}${durationTag}${driverName}</div>
+              <div class="text-[10px] text-slate-400">📅 ${dateStr} в ${timeStr}${driverName}</div>
             </div>
             ${canEdit ? `
               <button onclick="deleteLogEntry(${origIdx})" title="Удалить запись" class="text-rose-400 hover:text-rose-600 p-1.5 active:scale-90 transition">
@@ -892,13 +790,11 @@
     }
 
     async function deleteLogEntry(idx) {
-      haptic('warning');
       const ok = confirm('Удалить эту сессию зарядки?');
       if (ok) {
         const car = getSelectedCar();
         car.logs.splice(idx, 1);
         render();
-        haptic('success');
         await syncCarToCloud(car);
       }
     }
@@ -937,7 +833,6 @@
     }
 
     function showReportModal() {
-      haptic('light');
       const data = generateReportPayload();
       document.getElementById('reportContent').innerHTML = `
         <div class="space-y-1.5">
@@ -953,29 +848,7 @@
 
     function closeReportModal() { document.getElementById('reportModal').classList.add('hidden'); }
 
-    function sendReportToBot() {
-      haptic('success');
-      const data = generateReportPayload();
-      const botToken = '8952822528:AAF8qGUF4bdgYNUaoJ29pHDide4XtBjlRUU';
-      const chatId = tgUser?.id || (currentUserId !== 'guest' ? currentUserId : null);
-      if (!chatId) { notify('Откройте WebApp в Telegram.'); return; }
-
-      fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: data.reportText })
-      }).then(() => {
-        notify('✅ Отчет отправлен в чат боту!');
-        closeReportModal();
-      }).catch(() => {
-        navigator.clipboard.writeText(data.reportText);
-        notify('✅ Отчет скопирован в буфер!');
-        closeReportModal();
-      });
-    }
-
     function copyReportText() {
-      haptic('success');
       navigator.clipboard.writeText(generateReportPayload().reportText).then(() => {
         notify('✅ Текст скопирован!');
         closeReportModal();
@@ -983,15 +856,14 @@
     }
 
     function openExportModal() {
-      haptic('medium');
       const car = getSelectedCar();
       const logs = getFilteredLogs();
       if (logs.length === 0) { notify('История пуста.'); return; }
 
-      let tableText = `Отчет (${currentFilter}): ${car.name}\nДата\tВремя\tДлительность\tЛокация\tЗаряжено (кВт⋅ч)\tТариф (₽)\tИтого (₽)\n`;
+      let tableText = `Отчет (${currentFilter}): ${car.name}\nДата\tВремя\tЛокация\tЗаряжено (кВт⋅ч)\tТариф (₽)\tИтого (₽)\n`;
       logs.forEach(item => {
         const d = new Date(item.date);
-        tableText += `${d.toLocaleDateString('ru-RU')}\t${d.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'})}\t${item.duration || '-'}\t${item.location || '⚡'}\t${item.kwh}\t${item.rate || '-'}\t${item.totalPrice || item.price || 0}\n`;
+        tableText += `${d.toLocaleDateString('ru-RU')}\t${d.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'})}\t${item.location || '⚡'}\t${item.kwh}\t${item.rate || '-'}\t${item.totalPrice || item.price || 0}\n`;
       });
 
       document.getElementById('exportText').value = tableText;
@@ -1001,7 +873,6 @@
     function closeExportModal() { document.getElementById('exportModal').classList.add('hidden'); }
 
     function copyExportData() {
-      haptic('success');
       navigator.clipboard.writeText(document.getElementById('exportText').value).then(() => {
         notify('✅ Таблица скопирована!');
         closeExportModal();
@@ -1015,19 +886,17 @@
         notify('⛔ Только владелец может очистить журнал автомобиля!');
         return;
       }
-      haptic('warning');
       const ok = confirm('Очистить журнал своего автомобиля?');
       if (ok) {
         car.logs = [];
         render();
         populateMonthSelect();
-        haptic('success');
         notify('Журнал очищен.');
         await syncCarToCloud(car);
       }
     }
 
-    // Запуск приложения
+    // Запуск
     initChart();
     updateCatalogUI();
     render();
