@@ -234,7 +234,7 @@
       <div id="reportContent" class="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-xl p-3 mb-3 leading-relaxed"></div>
       <div class="space-y-2">
         <button onclick="copyReportText()" class="w-full accent-blue text-white py-2.5 rounded-xl text-xs font-bold active:scale-95 transition">📋 Скопировать отчет</button>
-        <button onclick="closeReportModal()" class="w-full bg-slate-100 text-slate-600 py-2.5 rounded-xl text-xs font-bold">Закрыть</button>
+        <button onclick="closeReportModal()" class="w-full bg-slate-100 text-slate-600 py-2 rounded-xl text-xs font-bold">Закрыть</button>
       </div>
     </div>
   </div>
@@ -360,7 +360,40 @@
       notify(`✅ Записано: +${kwhVal} кВт⋅ч (${Math.round(totalPrice)} ₽) в ${timeStr}`);
     }
 
-    // Обработка фото через сервер Render во Франкфурте (с гарантированной сменой статуса)
+    // Безопасное чтение и сжатие без ошибок переполнения памяти
+    async function compressImageSafely(file) {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const dataUrl = e.target.result;
+          const img = new Image();
+          img.onload = () => {
+            try {
+              const maxDim = 800;
+              let w = img.width, h = img.height;
+              if (w > maxDim || h > maxDim) {
+                if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+                else { w = Math.round((w * maxDim) / h); h = maxDim; }
+              }
+              const canvas = document.createElement('canvas');
+              canvas.width = w;
+              canvas.height = h;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(img, 0, 0, w, h);
+              resolve(canvas.toDataURL('image/jpeg', 0.65));
+            } catch (err) {
+              resolve(dataUrl);
+            }
+          };
+          img.onerror = () => resolve(dataUrl);
+          img.src = dataUrl;
+        };
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // Обработка фото через сервер Render во Франкфурте
     async function handleWebPhotoUpload(input, source) {
       const file = input.files?.[0];
       if (!file) return;
@@ -369,37 +402,15 @@
       const defaultText = source === 'camera' ? 'Снять на камеру' : 'Из галереи';
       const btnText = document.getElementById(btnId);
 
-      btnText.innerText = '⏳ Чтение файла...';
+      btnText.innerText = '⏳ Подготовка фото...';
 
-      const getBase64 = (f) => new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = (e) => reject(e);
-        reader.readAsDataURL(f);
-      });
+      const photoDate = file.lastModified ? new Date(file.lastModified) : new Date();
 
       try {
-        const rawBase64 = await getBase64(file);
-        btnText.innerText = '⚡ Сжатие...';
-
-        const base64Data = await new Promise((resolve) => {
-          const img = new Image();
-          img.onload = () => {
-            const maxDim = 800;
-            let w = img.width, h = img.height;
-            if (w > maxDim || h > maxDim) {
-              if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
-              else { w = Math.round((w * maxDim) / h); h = maxDim; }
-            }
-            const canvas = document.createElement('canvas');
-            canvas.width = w; canvas.height = h;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, w, h);
-            resolve(canvas.toDataURL('image/jpeg', 0.65));
-          };
-          img.onerror = () => resolve(rawBase64);
-          img.src = rawBase64;
-        });
+        const base64Data = await compressImageSafely(file);
+        if (!base64Data) {
+          throw new Error('Браузер не смог прочитать файл. Попробуйте сделать снимок заново.');
+        }
 
         btnText.innerText = '🚀 Сервер бота...';
 
@@ -415,7 +426,7 @@
         clearTimeout(timer);
 
         if (!res.ok) {
-          throw new Error(`Сервер ответил с кодом ${res.status}`);
+          throw new Error(`Сервер ответил кодом ${res.status}`);
         }
 
         const data = await res.json();
@@ -423,7 +434,6 @@
         if (data.kwh) {
           const kwhVal = parseFloat(data.kwh);
           const totalPrice = parseFloat((kwhVal * activeRateValue).toFixed(2));
-          const photoDate = file.lastModified ? new Date(file.lastModified) : new Date();
 
           const car = getSelectedCar();
           const { canEdit } = checkCanEdit(car);
@@ -464,9 +474,9 @@
         }
       } catch (err) {
         if (err.name === 'AbortError') {
-          notify('⚠️ Сервер Render просыпался слишком долго. Нажмите еще раз, теперь он активен!');
+          notify('⚠️ Сервер бота просыпался слишком долго. Повторите нажатие — сейчас он уже бодрствует.');
         } else {
-          notify('❌ Ошибка связи с ботом: ' + err.message);
+          notify('❌ Ошибка: ' + err.message);
         }
       } finally {
         btnText.innerText = defaultText;
