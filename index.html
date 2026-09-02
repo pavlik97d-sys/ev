@@ -234,7 +234,7 @@
       <div id="reportContent" class="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-xl p-3 mb-3 leading-relaxed"></div>
       <div class="space-y-2">
         <button onclick="copyReportText()" class="w-full accent-blue text-white py-2.5 rounded-xl text-xs font-bold active:scale-95 transition">📋 Скопировать отчет</button>
-        <button onclick="closeReportModal()" class="w-full bg-slate-100 text-slate-600 py-2 rounded-xl text-xs font-bold">Закрыть</button>
+        <button onclick="closeReportModal()" class="w-full bg-slate-100 text-slate-600 py-2.5 rounded-xl text-xs font-bold">Закрыть</button>
       </div>
     </div>
   </div>
@@ -360,7 +360,7 @@
       notify(`✅ Записано: +${kwhVal} кВт⋅ч (${Math.round(totalPrice)} ₽) в ${timeStr}`);
     }
 
-    // Обработка фото через сервер Render во Франкфурте
+    // Обработка фото через сервер Render во Франкфурте (с гарантированной сменой статуса)
     async function handleWebPhotoUpload(input, source) {
       const file = input.files?.[0];
       if (!file) return;
@@ -369,17 +369,22 @@
       const defaultText = source === 'camera' ? 'Снять на камеру' : 'Из галереи';
       const btnText = document.getElementById(btnId);
 
-      btnText.innerText = '⚡ Чтение через бот...';
+      btnText.innerText = '⏳ Чтение файла...';
 
-      const photoDate = file.lastModified ? new Date(file.lastModified) : new Date();
+      const getBase64 = (f) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = (e) => reject(e);
+        reader.readAsDataURL(f);
+      });
 
       try {
+        const rawBase64 = await getBase64(file);
+        btnText.innerText = '⚡ Сжатие...';
+
         const base64Data = await new Promise((resolve) => {
           const img = new Image();
-          const url = URL.createObjectURL(file);
-          img.src = url;
           img.onload = () => {
-            URL.revokeObjectURL(url);
             const maxDim = 800;
             let w = img.width, h = img.height;
             if (w > maxDim || h > maxDim) {
@@ -388,25 +393,37 @@
             }
             const canvas = document.createElement('canvas');
             canvas.width = w; canvas.height = h;
-            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, w, h);
             resolve(canvas.toDataURL('image/jpeg', 0.65));
           };
-          img.onerror = () => resolve(null);
+          img.onerror = () => resolve(rawBase64);
+          img.src = rawBase64;
         });
 
-        if (!base64Data) throw new Error('Ошибка сжатия изображения');
+        btnText.innerText = '🚀 Сервер бота...';
+
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 35000);
 
         const res = await fetch(RENDER_API_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ base64Image: base64Data })
+          body: JSON.stringify({ base64Image: base64Data }),
+          signal: controller.signal
         });
+        clearTimeout(timer);
+
+        if (!res.ok) {
+          throw new Error(`Сервер ответил с кодом ${res.status}`);
+        }
 
         const data = await res.json();
 
         if (data.kwh) {
           const kwhVal = parseFloat(data.kwh);
           const totalPrice = parseFloat((kwhVal * activeRateValue).toFixed(2));
+          const photoDate = file.lastModified ? new Date(file.lastModified) : new Date();
 
           const car = getSelectedCar();
           const { canEdit } = checkCanEdit(car);
@@ -436,13 +453,21 @@
 
           const dateStr = photoDate.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
           const timeStr = photoDate.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-          const durTag = data.duration ? `\n⏱️ Заряжалось: ${data.duration}` : '';
+          const durTag = data.duration ? `\n⏱️ Время: ${data.duration}` : '';
           notify(`✅ Записано: +${kwhVal} кВт⋅ч (${Math.round(totalPrice)} ₽)\n📅 ${dateStr}, ${timeStr}${durTag}`);
         } else {
-          notify('⚠️ Цифры кВт⋅ч не найдены на дисплее. Введите вручную.');
+          const manualKwh = prompt('⚠️ Цифры кВт⋅ч не найдены на дисплее.\nВведите количество кВт⋅ч вручную:');
+          if (manualKwh) {
+            document.getElementById('kwh').value = manualKwh.replace(',', '.');
+            saveFastData();
+          }
         }
       } catch (err) {
-        notify('❌ Ошибка связи с сервером бота: ' + err.message);
+        if (err.name === 'AbortError') {
+          notify('⚠️ Сервер Render просыпался слишком долго. Нажмите еще раз, теперь он активен!');
+        } else {
+          notify('❌ Ошибка связи с ботом: ' + err.message);
+        }
       } finally {
         btnText.innerText = defaultText;
         input.value = '';
