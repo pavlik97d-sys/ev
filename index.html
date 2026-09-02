@@ -361,15 +361,15 @@
       return { isOwner, isDriver, canEdit: isOwner || isDriver };
     }
 
-    // Быстрое сжатие: макс 700px, качество 0.65 (вес картинки всего 50-70 КБ)
-    function compressImageUltraFast(file) {
+    // Мгновенное сжатие в DataURL (Base64) без зависания мобильного браузера
+    function compressImageToBase64(file) {
       return new Promise((resolve) => {
         const img = new Image();
         const url = URL.createObjectURL(file);
         img.src = url;
         img.onload = () => {
           URL.revokeObjectURL(url);
-          const maxDim = 700;
+          const maxDim = 800;
           let w = img.width;
           let h = img.height;
           if (w > maxDim || h > maxDim) {
@@ -381,13 +381,18 @@
           canvas.height = h;
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0, w, h);
-          canvas.toBlob((blob) => resolve(blob || file), 'image/jpeg', 0.65);
+          resolve(canvas.toDataURL('image/jpeg', 0.65));
         };
-        img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target.result);
+          reader.readAsDataURL(file);
+        };
       });
     }
 
-    // Обработка фото с адекватным таймаутом в 25 секунд
+    // Распознавание через base64Image (стабильно, быстро и без CORS-зависаний)
     async function handleWebPhotoUpload(input, source) {
       const car = getSelectedCar();
       const { canEdit } = checkCanEdit(car);
@@ -410,37 +415,33 @@
       const photoDate = file.lastModified ? new Date(file.lastModified) : new Date();
 
       try {
-        const compressedBlob = await compressImageUltraFast(file);
-        btnText.innerText = '⚡ Сервер OCR...';
+        const base64Data = await compressImageToBase64(file);
+        btnText.innerText = '⚡ Распознавание...';
 
         const formData = new FormData();
-        formData.append('file', compressedBlob, 'c.jpg');
+        formData.append('base64Image', base64Data);
         formData.append('apikey', OCR_API_KEY);
         formData.append('language', 'rus');
         formData.append('OCREngine', '1');
 
-        // Даем серверу до 25 секунд (хватает при любых задержках)
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 25000);
-
         const res = await fetch('https://api.ocr.space/parse/image', {
           method: 'POST',
-          body: formData,
-          signal: controller.signal
+          body: formData
         });
-        clearTimeout(timeoutId);
 
         const data = await res.json();
+
+        if (data.IsErroredOnProcessing) {
+          throw new Error(data.ErrorMessage?.[0] || 'Ошибка обработки OCR');
+        }
 
         if (data.ParsedResults && data.ParsedResults.length > 0) {
           const text = data.ParsedResults[0].ParsedText.replace(',', '.');
 
-          // 1. Поиск кВт⋅ч
           let matchKwh = text.match(/(?:энергия|сумм[\.\s]*эн|energy)[\s:]*([0-9]+(?:\.[0-9]+)?)/i);
           if (!matchKwh) matchKwh = text.match(/([0-9]+(?:\.[0-9]+)?)\s*(?:kwh|квт)/i);
           if (!matchKwh) matchKwh = text.match(/([0-9]+\.[0-9]+)/);
 
-          // 2. Поиск продолжительности зарядки
           let matchDuration = text.match(/(?:время|time)[\s:]*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)/i);
           let durationStr = '';
           if (matchDuration && matchDuration[1]) {
@@ -480,14 +481,10 @@
             notify('⚠️ Цифры кВт⋅ч не найдены. Сфотографируйте дисплей ближе.');
           }
         } else {
-          notify('⚠️ Сервер OCR перегружен. Попробуйте еще раз.');
+          notify('⚠️ Сервер не смог распознать символы на фото.');
         }
       } catch (e) {
-        if (e.name === 'AbortError') {
-          notify('⚠️ Сервер распознавания не ответил за 25 секунд. Попробуйте еще раз.');
-        } else {
-          notify('❌ Ошибка OCR: ' + e.message);
-        }
+        notify('❌ Ошибка OCR: ' + e.message);
       } finally {
         btnText.innerText = defaultText;
         input.value = '';
