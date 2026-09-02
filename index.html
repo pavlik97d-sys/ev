@@ -7,8 +7,6 @@
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <!-- Извлечение даты/времени съемки из метаданных фото (EXIF) -->
-  <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
   <style>
     body { background: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #0f172a; }
     .card-clean { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.05); }
@@ -363,83 +361,40 @@
       return { isOwner, isDriver, canEdit: isOwner || isDriver };
     }
 
-    // Быстрое сжатие фото (до 800px, 70-120 КБ) для мгновенной передачи в OCR
-    function compressImage(file, maxWidth = 800, quality = 0.7) {
+    // Мгновенное сжатие через URL.createObjectURL без зависания FileReader
+    function compressImageFast(file, maxWidth = 800, quality = 0.7) {
       return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = (event) => {
-          const img = new Image();
-          img.src = event.target.result;
-          img.onload = () => {
-            const canvas = document.createElement('canvas');
-            let width = img.width;
-            let height = img.height;
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.src = url;
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
 
-            if (width > maxWidth) {
-              height = Math.round((height * maxWidth) / width);
-              width = maxWidth;
-            }
-
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, width, height);
-
-            canvas.toBlob((blob) => {
-              resolve(blob);
-            }, 'image/jpeg', quality);
-          };
-          img.onerror = () => resolve(file);
-        };
-        reader.onerror = () => resolve(file);
-      });
-    }
-
-    // Точная дата и время съемки из EXIF-метаданных файла
-    function extractDateFromImage(file) {
-      return new Promise((resolve) => {
-        try {
-          if (window.EXIF) {
-            EXIF.getData(file, function() {
-              const dt = EXIF.getTag(this, "DateTimeOriginal") || EXIF.getTag(this, "DateTime");
-              if (dt) {
-                const parts = dt.split(' ');
-                if (parts.length === 2) {
-                  const dateParts = parts[0].split(':');
-                  const timeParts = parts[1].split(':');
-                  if (dateParts.length === 3 && timeParts.length === 3) {
-                    const parsedDate = new Date(
-                      parseInt(dateParts[0]),
-                      parseInt(dateParts[1]) - 1,
-                      parseInt(dateParts[2]),
-                      parseInt(timeParts[0]),
-                      parseInt(timeParts[1]),
-                      parseInt(timeParts[2])
-                    );
-                    if (!isNaN(parsedDate.getTime())) {
-                      resolve(parsedDate);
-                      return;
-                    }
-                  }
-                }
-              }
-              if (file.lastModified) {
-                resolve(new Date(file.lastModified));
-                return;
-              }
-              resolve(new Date());
-            });
-          } else {
-            resolve(file.lastModified ? new Date(file.lastModified) : new Date());
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
           }
-        } catch(e) {
-          resolve(new Date());
-        }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+
+          canvas.toBlob((blob) => {
+            resolve(blob || file);
+          }, 'image/jpeg', quality);
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          resolve(file);
+        };
       });
     }
 
-    // Распознавание фото с быстрым откликом и парсингом времени
+    // Быстрое распознавание без зависаний
     async function handleWebPhotoUpload(input, source) {
       const car = getSelectedCar();
       const { canEdit } = checkCanEdit(car);
@@ -459,11 +414,12 @@
       btnText.innerText = '⚡ Чтение (1-2 сек)...';
       haptic('medium');
 
+      // Дата берется мгновенно из свойств файла (время съемки)
+      const photoDate = file.lastModified ? new Date(file.lastModified) : new Date();
+
       try {
-        const [photoDate, compressedBlob] = await Promise.all([
-          extractDateFromImage(file),
-          compressImage(file, 800, 0.7)
-        ]);
+        // Мгновенное легкое сжатие
+        const compressedBlob = await compressImageFast(file, 800, 0.7);
 
         const formData = new FormData();
         formData.append('file', compressedBlob, 'c.jpg');
@@ -472,7 +428,7 @@
         formData.append('OCREngine', '1');
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        const timeoutId = setTimeout(() => controller.abort(), 7000); // Строгий таймаут 7 секунд
 
         const res = await fetch('https://api.ocr.space/parse/image', {
           method: 'POST',
@@ -491,7 +447,7 @@
           if (!matchKwh) matchKwh = text.match(/([0-9]+(?:\.[0-9]+)?)\s*(?:kwh|квт)/i);
           if (!matchKwh) matchKwh = text.match(/([0-9]+\.[0-9]+)/);
 
-          // Поиск продолжительности зарядки на дисплее (например, Время: 4:48:12)
+          // Поиск продолжительности зарядки на дисплее
           let matchDuration = text.match(/(?:время|time)[\s:]*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)/i);
           let durationStr = '';
           if (matchDuration && matchDuration[1]) {
@@ -1081,7 +1037,7 @@
       }
     }
 
-    // Запуск приложения
+    // Запуск
     initChart();
     updateCatalogUI();
     render();
