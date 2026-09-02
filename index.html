@@ -21,12 +21,12 @@
   <!-- 1. Каталог авто -->
   <div class="card-clean rounded-2xl p-3.5">
     <div class="flex items-center justify-between gap-2 mb-2.5">
-      <div class="flex-1">
+      <div class="flex-1 min-w-0">
         <label class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Каталог авто сообщества:</label>
         <select id="carSelect" onchange="selectCar(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold text-blue-700 outline-none focus:border-blue-500">
         </select>
       </div>
-      <div id="carActionContainer" class="pt-4">
+      <div id="carActionContainer" class="pt-4 shrink-0">
         <button id="addCarBtn" onclick="handleCarAction()" class="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2.5 rounded-xl text-xs font-bold active:scale-95 transition shadow-sm whitespace-nowrap">
           ➕ Добавить авто
         </button>
@@ -52,7 +52,7 @@
   </div>
 
   <!-- 2. Форма экспресс-зарядки -->
-  <div id="chargeFormCard" class="card-clean rounded-2xl p-4 space-y-3 border-blue-100 bg-gradient-to-b from-blue-50/30 to-white shadow-sm">
+  <div id="chargeFormCard" class="card-clean rounded-2xl p-4 space-y-3 border-blue-100 bg-gradient-to-b from-blue-50/30 to-white shadow-sm overflow-hidden">
     <div class="flex items-center justify-between">
       <div class="text-xs font-bold uppercase tracking-wider text-blue-700 flex items-center gap-1.5">
         <span>⚡</span> Экспресс-зарядка
@@ -69,12 +69,12 @@
       <div id="presetsContainer" class="flex gap-1.5 overflow-x-auto py-0.5"></div>
     </div>
 
-    <!-- Шаг 2: Ввод кВт⋅ч вручную (адаптивная верстка, кнопка не съезжает) -->
+    <!-- Шаг 2: Ввод кВт⋅ч вручную (сетка grid, кнопка строго на своем месте) -->
     <div class="pt-1">
       <label class="text-[10px] uppercase font-bold text-slate-400 mb-1 block">2. Заряжено энергии:</label>
-      <div class="flex items-stretch gap-2 w-full">
-        <input id="kwh" type="number" step="any" placeholder="14.5" class="w-0 flex-1 min-w-0 bg-white border-2 border-blue-200 rounded-xl px-3 py-2.5 text-base font-black text-slate-800 outline-none focus:border-blue-500 shadow-inner">
-        <button onclick="saveFastData()" class="accent-blue text-white px-4 rounded-xl text-xs font-bold active:scale-95 transition shadow-md shadow-blue-500/20 shrink-0 flex items-center justify-center gap-1.5 whitespace-nowrap">
+      <div class="grid grid-cols-[1fr_auto] gap-2 w-full items-center">
+        <input id="kwh" type="number" step="any" placeholder="14.5" class="w-full min-w-0 bg-white border-2 border-blue-200 rounded-xl px-3 py-2.5 text-base font-black text-slate-800 outline-none focus:border-blue-500 shadow-inner">
+        <button onclick="saveFastData()" class="accent-blue text-white px-4 py-2.5 rounded-xl text-xs font-bold active:scale-95 transition shadow-md shadow-blue-500/20 whitespace-nowrap flex items-center justify-center gap-1.5 h-full">
           <span>💾</span> <span>Записать</span>
         </button>
       </div>
@@ -199,19 +199,19 @@
           <div class="grid grid-cols-2 gap-2">
             <div>
               <label class="text-[10px] text-slate-400">🏠 Ночь:</label>
-              <input id="rateNightInput" type="number" step="any" placeholder="2.8" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs outline-none focus:border-blue-500">
+              <input id="rateNightInput" type="number" step="any" placeholder="2.8" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:border-blue-500">
             </div>
             <div>
               <label class="text-[10px] text-slate-400">🏠 День:</label>
-              <input id="rateDayInput" type="number" step="any" placeholder="6.5" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs outline-none focus:border-blue-500">
+              <input id="rateDayInput" type="number" step="any" placeholder="6.5" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:border-blue-500">
             </div>
             <div>
               <label class="text-[10px] text-slate-400">💼 Работа:</label>
-              <input id="rateWorkInput" type="number" step="any" placeholder="0" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs outline-none focus:border-blue-500">
+              <input id="rateWorkInput" type="number" step="any" placeholder="0" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:border-blue-500">
             </div>
             <div>
               <label class="text-[10px] text-slate-400">⚡ ЭЗС:</label>
-              <input id="rateEzInput" type="number" step="any" placeholder="19.0" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs outline-none focus:border-blue-500">
+              <input id="rateEzInput" type="number" step="any" placeholder="19.0" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:border-blue-500">
             </div>
           </div>
         </div>
@@ -360,7 +360,7 @@
       notify(`✅ Записано: +${kwhVal} кВт⋅ч (${Math.round(totalPrice)} ₽) в ${timeStr}`);
     }
 
-    // Безопасное чтение и сжатие без ошибок переполнения памяти
+    // Безопасное чтение и сжатие без ошибок памяти
     async function compressImageSafely(file) {
       return new Promise((resolve) => {
         const reader = new FileReader();
@@ -409,7 +409,7 @@
       try {
         const base64Data = await compressImageSafely(file);
         if (!base64Data) {
-          throw new Error('Браузер не смог прочитать файл. Попробуйте сделать снимок заново.');
+          throw new Error('Браузер не смог прочитать файл. Сделайте снимок заново.');
         }
 
         btnText.innerText = '🚀 Сервер бота...';
@@ -474,7 +474,7 @@
         }
       } catch (err) {
         if (err.name === 'AbortError') {
-          notify('⚠️ Сервер бота просыпался слишком долго. Повторите нажатие — сейчас он уже бодрствует.');
+          notify('⚠️ Сервер бота просыпался слишком долго. Повторите попытку — сейчас он активен.');
         } else {
           notify('❌ Ошибка связи с ботом: ' + err.message);
         }
