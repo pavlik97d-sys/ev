@@ -28,28 +28,29 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
     def _set_cors_headers(self):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
 
     def do_OPTIONS(self):
         self.send_response(200)
         self._set_cors_headers()
+        self.send_header('Content-Length', '0')
         self.end_headers()
 
     def do_GET(self):
         self.send_response(200)
         self._set_cors_headers()
-        self.send_header('Content-type', 'text/plain')
+        self.send_header('Content-Type', 'text/plain; charset=utf-8')
         self.end_headers()
         self.wfile.write(b"OK")
 
     def do_POST(self):
-        if self.path == '/api/ocr':
-            content_length = int(self.headers.get('Content-Length', 0))
-            post_data = self.rfile.read(content_length)
-
+        if self.path.startswith('/api/ocr'):
             try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                post_data = self.rfile.read(content_length)
+
                 body = json.loads(post_data.decode('utf-8'))
-                base64_image = body.get('base64Image')
+                base64_image = body.get('base64Image', '')
 
                 if not base64_image:
                     self.send_response(400)
@@ -59,34 +60,41 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                     self.wfile.write(json.dumps({'error': 'No image provided'}).encode('utf-8'))
                     return
 
-                # Прямой запрос из Франкфурта к OCR без ограничений РФ
+                # Очищаем префикс base64 data url, если он присутствует
+                if ',' in base64_image:
+                    base64_clean = base64_image.split(',', 1)[1]
+                else:
+                    base64_clean = base64_image
+
+                # Запрос к OCR.space из дата-центра Render
                 payload = {
-                    'base64Image': base64_image,
+                    'base64Image': 'data:image/jpeg;base64,' + base64_clean,
                     'apikey': OCR_API_KEY,
                     'language': 'rus',
-                    'OCREngine': '1'
+                    'scale': 'true',
+                    'OCREngine': '2'
                 }
-                ocr_res = requests.post('https://api.ocr.space/parse/image', data=payload, timeout=20)
+                ocr_res = requests.post('https://api.ocr.space/parse/image', data=payload, timeout=25)
                 ocr_data = ocr_res.json()
 
                 if ocr_data.get('IsErroredOnProcessing') or not ocr_data.get('ParsedResults'):
-                    self.send_response(422)
+                    self.send_response(200)
                     self._set_cors_headers()
                     self.send_header('Content-Type', 'application/json')
                     self.end_headers()
-                    self.wfile.write(json.dumps({'error': 'OCR parse error'}).encode('utf-8'))
+                    self.wfile.write(json.dumps({'kwh': None, 'duration': ''}).encode('utf-8'))
                     return
 
                 text = ocr_data['ParsedResults'][0].get('ParsedText', '').replace(',', '.')
 
-                # 1. Поиск кВт⋅ч
+                # 1. Поиск кВт*ч
                 kwh_match = re.search(r'(?:энергия|сумм[\.\s]*эн|energy)[\s:]*([0-9]+(?:\.[0-9]+)?)', text, re.I)
                 if not kwh_match:
                     kwh_match = re.search(r'([0-9]+(?:\.[0-9]+)?)\s*(?:kwh|квт)', text, re.I)
                 if not kwh_match:
                     kwh_match = re.search(r'([0-9]+\.[0-9]+)', text)
 
-                # 2. Поиск времени
+                # 2. Поиск длительности
                 dur_match = re.search(r'(?:время|time)[\s:]*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)', text, re.I)
                 duration_str = ''
                 if dur_match:
