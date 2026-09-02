@@ -69,13 +69,13 @@
       <div id="presetsContainer" class="flex gap-1.5 overflow-x-auto py-0.5"></div>
     </div>
 
-    <!-- Шаг 2: Ввод кВт⋅ч вручную -->
+    <!-- Шаг 2: Ввод кВт⋅ч вручную (адаптивная верстка, кнопка не съезжает) -->
     <div class="pt-1">
       <label class="text-[10px] uppercase font-bold text-slate-400 mb-1 block">2. Заряжено энергии:</label>
-      <div class="flex gap-2">
-        <input id="kwh" type="number" step="any" placeholder="кВт⋅ч (напр. 14.5)" class="flex-1 bg-white border-2 border-blue-200 rounded-xl p-3 text-base font-black text-slate-800 outline-none focus:border-blue-500 shadow-inner">
-        <button onclick="saveFastData()" class="accent-blue text-white px-5 rounded-xl text-xs font-bold active:scale-95 transition shadow-md shadow-blue-500/20 whitespace-nowrap flex items-center gap-1.5">
-          <span>💾</span> Записать
+      <div class="flex items-stretch gap-2 w-full">
+        <input id="kwh" type="number" step="any" placeholder="14.5" class="w-0 flex-1 min-w-0 bg-white border-2 border-blue-200 rounded-xl px-3 py-2.5 text-base font-black text-slate-800 outline-none focus:border-blue-500 shadow-inner">
+        <button onclick="saveFastData()" class="accent-blue text-white px-4 rounded-xl text-xs font-bold active:scale-95 transition shadow-md shadow-blue-500/20 shrink-0 flex items-center justify-center gap-1.5 whitespace-nowrap">
+          <span>💾</span> <span>Записать</span>
         </button>
       </div>
     </div>
@@ -199,19 +199,19 @@
           <div class="grid grid-cols-2 gap-2">
             <div>
               <label class="text-[10px] text-slate-400">🏠 Ночь:</label>
-              <input id="rateNightInput" type="number" step="any" placeholder="2.8" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:border-blue-500">
+              <input id="rateNightInput" type="number" step="any" placeholder="2.8" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs outline-none focus:border-blue-500">
             </div>
             <div>
               <label class="text-[10px] text-slate-400">🏠 День:</label>
-              <input id="rateDayInput" type="number" step="any" placeholder="6.5" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:border-blue-500">
+              <input id="rateDayInput" type="number" step="any" placeholder="6.5" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs outline-none focus:border-blue-500">
             </div>
             <div>
               <label class="text-[10px] text-slate-400">💼 Работа:</label>
-              <input id="rateWorkInput" type="number" step="any" placeholder="0" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:border-blue-500">
+              <input id="rateWorkInput" type="number" step="any" placeholder="0" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs outline-none focus:border-blue-500">
             </div>
             <div>
               <label class="text-[10px] text-slate-400">⚡ ЭЗС:</label>
-              <input id="rateEzInput" type="number" step="any" placeholder="19.0" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none focus:border-blue-500">
+              <input id="rateEzInput" type="number" step="any" placeholder="19.0" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs outline-none focus:border-blue-500">
             </div>
           </div>
         </div>
@@ -476,7 +476,7 @@
         if (err.name === 'AbortError') {
           notify('⚠️ Сервер бота просыпался слишком долго. Повторите нажатие — сейчас он уже бодрствует.');
         } else {
-          notify('❌ Ошибка: ' + err.message);
+          notify('❌ Ошибка связи с ботом: ' + err.message);
         }
       } finally {
         btnText.innerText = defaultText;
