@@ -69,7 +69,7 @@
       <div id="presetsContainer" class="flex gap-1.5 overflow-x-auto py-0.5"></div>
     </div>
 
-    <!-- Шаг 2: Ввод кВт⋅ч (быстро и без зависаний) -->
+    <!-- Шаг 2: Ввод кВт⋅ч вручную -->
     <div class="pt-1">
       <label class="text-[10px] uppercase font-bold text-slate-400 mb-1 block">2. Заряжено энергии:</label>
       <div class="flex gap-2">
@@ -80,7 +80,7 @@
       </div>
     </div>
 
-    <!-- Шаг 3: Автосчитывание по фото (опционально) -->
+    <!-- Шаг 3: Автосчитывание через бот на Render -->
     <div class="pt-1 border-t border-slate-100">
       <label class="text-[10px] uppercase font-bold text-slate-400 mb-1.5 block">Или распознать по фото экрана:</label>
       <div class="grid grid-cols-2 gap-2">
@@ -257,7 +257,7 @@
   <script>
     const SUPABASE_REST = 'https://smxvjnlbwiaoudwlbvud.supabase.co/rest/v1/ev_cars';
     const SUPABASE_KEY = 'sb_publishable_XZpvUvSdYte6jLJsWDMNJg_YWgVHkc2';
-    const OCR_API_KEY = 'K81090819088957';
+    const RENDER_API_URL = 'https://geely-bot.onrender.com/api/ocr';
 
     const urlParams = new URLSearchParams(window.location.search);
     const paramUid = urlParams.get('uid');
@@ -360,7 +360,7 @@
       notify(`✅ Записано: +${kwhVal} кВт⋅ч (${Math.round(totalPrice)} ₽) в ${timeStr}`);
     }
 
-    // Обработка фото с жестким контролем времени (макс 6 сек)
+    // Обработка фото через сервер Render во Франкфурте
     async function handleWebPhotoUpload(input, source) {
       const file = input.files?.[0];
       if (!file) return;
@@ -369,76 +369,80 @@
       const defaultText = source === 'camera' ? 'Снять на камеру' : 'Из галереи';
       const btnText = document.getElementById(btnId);
 
-      btnText.innerText = '⚡ Чтение...';
+      btnText.innerText = '⚡ Чтение через бот...';
 
-      // Извлекаем точную дату съемки из файла
       const photoDate = file.lastModified ? new Date(file.lastModified) : new Date();
 
-      // Сжимаем
-      const base64Data = await new Promise((resolve) => {
-        const img = new Image();
-        const url = URL.createObjectURL(file);
-        img.src = url;
-        img.onload = () => {
-          URL.revokeObjectURL(url);
-          const maxDim = 600;
-          let w = img.width, h = img.height;
-          if (w > maxDim || h > maxDim) {
-            if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
-            else { w = Math.round((w * maxDim) / h); h = maxDim; }
-          }
-          const canvas = document.createElement('canvas');
-          canvas.width = w; canvas.height = h;
-          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-          resolve(canvas.toDataURL('image/jpeg', 0.6));
-        };
-        img.onerror = () => resolve(null);
-      });
-
-      if (!base64Data) {
-        btnText.innerText = defaultText;
-        return;
-      }
-
       try {
-        const formData = new FormData();
-        formData.append('base64Image', base64Data);
-        formData.append('apikey', OCR_API_KEY);
-        formData.append('language', 'rus');
-        formData.append('OCREngine', '1');
-
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 6000); // Строго 6 секунд!
-
-        const res = await fetch('https://api.ocr.space/parse/image', {
-          method: 'POST',
-          body: formData,
-          signal: controller.signal
+        const base64Data = await new Promise((resolve) => {
+          const img = new Image();
+          const url = URL.createObjectURL(file);
+          img.src = url;
+          img.onload = () => {
+            URL.revokeObjectURL(url);
+            const maxDim = 800;
+            let w = img.width, h = img.height;
+            if (w > maxDim || h > maxDim) {
+              if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+              else { w = Math.round((w * maxDim) / h); h = maxDim; }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = w; canvas.height = h;
+            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+            resolve(canvas.toDataURL('image/jpeg', 0.65));
+          };
+          img.onerror = () => resolve(null);
         });
-        clearTimeout(timer);
+
+        if (!base64Data) throw new Error('Ошибка сжатия изображения');
+
+        const res = await fetch(RENDER_API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base64Image: base64Data })
+        });
 
         const data = await res.json();
 
-        if (data.ParsedResults && data.ParsedResults.length > 0) {
-          const text = data.ParsedResults[0].ParsedText.replace(',', '.');
-          let match = text.match(/(?:энергия|сумм[\.\s]*эн|energy)[\s:]*([0-9]+(?:\.[0-9]+)?)/i);
-          if (!match) match = text.match(/([0-9]+(?:\.[0-9]+)?)\s*(?:kwh|квт)/i);
-          if (!match) match = text.match(/([0-9]+\.[0-9]+)/);
+        if (data.kwh) {
+          const kwhVal = parseFloat(data.kwh);
+          const totalPrice = parseFloat((kwhVal * activeRateValue).toFixed(2));
 
-          if (match && match[1]) {
-            document.getElementById('kwh').value = match[1];
-            notify(`✅ Распознано: ${match[1]} кВт⋅ч. Нажмите «Записать»!`);
+          const car = getSelectedCar();
+          const { canEdit } = checkCanEdit(car);
+          if (!canEdit) {
+            notify('⛔ У вас нет прав на добавление сессий!');
             return;
           }
+
+          if (!car.logs) car.logs = [];
+          car.logs.push({
+            kwh: kwhVal,
+            rate: activeRateValue,
+            location: activeLocation,
+            duration: data.duration || '',
+            totalPrice: totalPrice,
+            price: totalPrice,
+            author: currentUserName,
+            author_id: currentUserId,
+            date: photoDate.toISOString()
+          });
+
+          car.logs.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+          render();
+          populateMonthSelect();
+          await syncCarToCloud(car);
+
+          const dateStr = photoDate.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+          const timeStr = photoDate.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+          const durTag = data.duration ? `\n⏱️ Заряжалось: ${data.duration}` : '';
+          notify(`✅ Записано: +${kwhVal} кВт⋅ч (${Math.round(totalPrice)} ₽)\n📅 ${dateStr}, ${timeStr}${durTag}`);
+        } else {
+          notify('⚠️ Цифры кВт⋅ч не найдены на дисплее. Введите вручную.');
         }
-        notify('⚠️ Цифры не распознаны. Введите кВт⋅ч в поле выше.');
-      } catch(e) {
-        // Если провайдер заблокировал запрос к OCR — не висим, а сразу просим ввести кВт*ч
-        const manualKwh = prompt('Связь с сервером OCR ограничена провайдером.\nСколько кВт⋅ч на дисплее?');
-        if (manualKwh) {
-          document.getElementById('kwh').value = manualKwh.replace(',', '.');
-          saveFastData();
-        }
+      } catch (err) {
+        notify('❌ Ошибка связи с сервером бота: ' + err.message);
       } finally {
         btnText.innerText = defaultText;
         input.value = '';
@@ -771,13 +775,14 @@
         const timeStr = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
         const cost = Math.round(item.totalPrice || item.price || 0);
         const loc = item.location || '⚡ Зарядка';
+        const durationTag = item.duration ? ` • ⏱️ ${item.duration}` : '';
         const driverName = item.author ? ` • 👤 ${item.author}` : '';
 
         return `
           <div class="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-xl text-xs">
             <div>
               <div class="font-bold text-slate-800">${loc} +${item.kwh} кВт⋅ч <span class="text-blue-600 font-bold">(${cost} ₽)</span></div>
-              <div class="text-[10px] text-slate-400">📅 ${dateStr} в ${timeStr}${driverName}</div>
+              <div class="text-[10px] text-slate-400">📅 ${dateStr} в ${timeStr}${durationTag}${driverName}</div>
             </div>
             ${canEdit ? `
               <button onclick="deleteLogEntry(${origIdx})" title="Удалить запись" class="text-rose-400 hover:text-rose-600 p-1.5 active:scale-90 transition">
