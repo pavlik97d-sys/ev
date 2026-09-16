@@ -142,7 +142,7 @@
     </div>
   </div>
 
-  <!-- 6. Журнал зарядок (с поддержкой полного просмотра) -->
+  <!-- 6. Журнал зарядок с полным просмотром -->
   <div class="card-clean rounded-2xl p-4">
     <div class="text-xs font-bold uppercase tracking-wider text-slate-700 mb-2.5 flex items-center justify-between">
       <span>🕒 Журнал зарядок</span>
@@ -825,7 +825,7 @@
         const d = new Date(item.date);
         const dateStr = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' });
         const timeStr = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-        const cost = Math.round(getItemCost(item));
+        const cost = getItemCost(item);
         const loc = item.location || '⚡ Зарядка';
         const durationTag = item.duration ? ` • ⏱️ ${item.duration}` : '';
         const driverName = item.author ? ` • 👤 ${item.author}` : '';
@@ -882,10 +882,11 @@
       renderChart();
       renderRecentLogs();
 
-      const avgPerCharge = logs.length > 0 ? Math.round(totalCost / logs.length) : 0;
+      const avgPerCharge = logs.length > 0 ? (totalCost / logs.length).toFixed(1) : 0;
       document.getElementById('avg-cost-per-charge').innerText = `${avgPerCharge} ₽ / средн. сессия`;
 
-      document.getElementById('period-cost').innerText = `${Math.round(totalCost)} ₽`;
+      // Вывод точной суммы без принудительного округления до целых
+      document.getElementById('period-cost').innerText = `${Number(totalCost.toFixed(2))} ₽`;
       document.getElementById('period-kwh').innerText = `${totalKwh.toFixed(1)} кВт⋅ч`;
       document.getElementById('sessions-count-label').innerText = `${logs.length} сессий`;
     }
@@ -897,7 +898,7 @@
       let totalKwh = logs.reduce((acc, i) => acc + parseFloat(i.kwh || 0), 0);
       const periodName = currentFilter === 'all' ? 'Всё время' : (currentFilter === 'current' ? 'Этот месяц' : currentFilter);
 
-      const reportText = `📊 Сводный отчет EV Garage\n🚗 Авто: ${car.name}\n👤 Владелец: ${car.owner_name || car.ownerName || 'Водитель'}\n📅 Период: ${periodName}\n\n• Сессий зарядок: ${logs.length}\n• Заряжено энергии: ${totalKwh.toFixed(1)} кВт⋅ч\n• Затраты на зарядку: ${Math.round(totalCost)} ₽`;
+      const reportText = `📊 Сводный отчет EV Garage\n🚗 Авто: ${car.name}\n👤 Владелец: ${car.owner_name || car.ownerName || 'Водитель'}\n📅 Период: ${periodName}\n\n• Сессий зарядок: ${logs.length}\n• Заряжено энергии: ${totalKwh.toFixed(1)} кВт⋅ч\n• Затраты на зарядку: ${Number(totalCost.toFixed(2))} ₽`;
 
       return { reportText, totalCost, totalKwh, periodName, car, logs };
     }
@@ -910,7 +911,7 @@
           <div class="text-[11px] text-slate-500 border-b border-slate-200 pb-1">Период: <b>${data.periodName}</b></div>
           <div>• Всего сессий: <b>${data.logs.length}</b></div>
           <div>• Заряжено энергии: <b>${data.totalKwh.toFixed(1)} кВт⋅ч</b></div>
-          <div>• Суммарные затраты: <b>${Math.round(data.totalCost)} ₽</b></div>
+          <div>• Суммарные затраты: <b>${Number(data.totalCost.toFixed(2))} ₽</b></div>
         </div>
       `;
       document.getElementById('reportModal').classList.remove('hidden');
@@ -935,7 +936,13 @@
         const d = new Date(item.date);
         const timeStr = d.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'});
         const cost = getItemCost(item);
-        tableText += `${d.toLocaleDateString('ru-RU')}\t${timeStr}\t${item.location || '⚡'}\t${item.kwh}\t${item.rate ?? '-'}\t${cost}\n`;
+
+        // Заменяем точки на запятые для корректного распознавания чисел в Excel
+        const kwhStr = String(item.kwh).replace('.', ',');
+        const rateStr = item.rate !== undefined && item.rate !== null ? String(item.rate).replace('.', ',') : '-';
+        const costStr = String(cost).replace('.', ',');
+
+        tableText += `${d.toLocaleDateString('ru-RU')}\t${timeStr}\t${item.location || '⚡'}\t${kwhStr}\t${rateStr}\t${costStr}\n`;
       });
 
       document.getElementById('exportText').value = tableText;
