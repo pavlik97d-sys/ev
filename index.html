@@ -69,7 +69,7 @@
       <div id="presetsContainer" class="flex gap-1.5 overflow-x-auto py-0.5"></div>
     </div>
 
-    <!-- Шаг 2: Ввод кВт⋅ч вручную (сетка grid, кнопка строго на своем месте) -->
+    <!-- Шаг 2: Ввод кВт⋅ч вручную -->
     <div class="pt-1">
       <label class="text-[10px] uppercase font-bold text-slate-400 mb-1 block">2. Заряжено энергии:</label>
       <div class="grid grid-cols-[1fr_auto] gap-2 w-full items-center">
@@ -142,13 +142,13 @@
     </div>
   </div>
 
-  <!-- 6. Последние сессии -->
+  <!-- 6. Журнал зарядок (с поддержкой полного просмотра) -->
   <div class="card-clean rounded-2xl p-4">
     <div class="text-xs font-bold uppercase tracking-wider text-slate-700 mb-2.5 flex items-center justify-between">
       <span>🕒 Журнал зарядок</span>
-      <span class="text-[10px] text-slate-400 font-normal">С датой и временем</span>
+      <span id="journal-count-badge" class="text-[10px] text-slate-400 font-normal">0 сессий</span>
     </div>
-    <div id="recentLogsContainer" class="space-y-2"></div>
+    <div id="recentLogsContainer" class="space-y-2 max-h-[460px] overflow-y-auto pr-0.5"></div>
   </div>
 
   <!-- 7. Панель действий -->
@@ -275,6 +275,7 @@
     let currentFilter = 'all';
     let chartMode = 'weekday';
     let chartInstance = null;
+    let showAllLogs = false;
 
     function notify(msg) { alert(msg); }
 
@@ -314,6 +315,13 @@
       const isDriver = (myId !== '' && driversList.includes(myId));
 
       return { isOwner, isDriver, canEdit: isOwner || isDriver };
+    }
+
+    // Единый строгий расчет стоимости записи
+    function getItemCost(item) {
+      if (item.totalPrice !== undefined && item.totalPrice !== null) return Number(item.totalPrice);
+      if (item.price !== undefined && item.price !== null) return Number(item.price);
+      return Number(((Number(item.kwh) || 0) * (Number(item.rate) || 0)).toFixed(2));
     }
 
     // Мгновенная запись кВт*ч по кнопке
@@ -791,24 +799,33 @@
       chartInstance.update();
     }
 
+    function toggleShowAllLogs() {
+      showAllLogs = !showAllLogs;
+      renderRecentLogs();
+    }
+
     function renderRecentLogs() {
       const car = getSelectedCar();
       const { canEdit } = checkCanEdit(car);
       const container = document.getElementById('recentLogsContainer');
-      const logs = car.logs || [];
+      const badge = document.getElementById('journal-count-badge');
+      const logs = getFilteredLogs();
+
+      if (badge) badge.innerText = `${logs.length} сессий`;
 
       if (logs.length === 0) {
         container.innerHTML = '<div class="text-[11px] text-slate-400 text-center py-2">История зарядок пуста</div>';
         return;
       }
 
-      const recent = [...logs].reverse().slice(0, 6);
-      container.innerHTML = recent.map((item, idx) => {
-        const origIdx = logs.length - 1 - idx;
+      const displayLogs = showAllLogs ? [...logs].reverse() : [...logs].reverse().slice(0, 6);
+
+      const listHtml = displayLogs.map((item) => {
+        const origIdx = (car.logs || []).indexOf(item);
         const d = new Date(item.date);
-        const dateStr = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+        const dateStr = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' });
         const timeStr = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-        const cost = Math.round(item.totalPrice || item.price || 0);
+        const cost = Math.round(getItemCost(item));
         const loc = item.location || '⚡ Зарядка';
         const durationTag = item.duration ? ` • ⏱️ ${item.duration}` : '';
         const driverName = item.author ? ` • 👤 ${item.author}` : '';
@@ -827,14 +844,27 @@
           </div>
         `;
       }).join('');
+
+      let toggleBtnHtml = '';
+      if (logs.length > 6) {
+        toggleBtnHtml = `
+          <button onclick="toggleShowAllLogs()" class="w-full mt-2 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition active:scale-[0.98]">
+            ${showAllLogs ? '▲ Свернуть до 6' : `▼ Показать все (${logs.length} сессий)`}
+          </button>
+        `;
+      }
+
+      container.innerHTML = listHtml + toggleBtnHtml;
     }
 
     async function deleteLogEntry(idx) {
+      if (idx < 0) return;
       const ok = confirm('Удалить эту сессию зарядки?');
       if (ok) {
         const car = getSelectedCar();
         car.logs.splice(idx, 1);
         render();
+        populateMonthSelect();
         await syncCarToCloud(car);
       }
     }
@@ -846,7 +876,7 @@
 
       logs.forEach(i => {
         totalKwh += parseFloat(i.kwh || 0);
-        totalCost += parseFloat(i.totalPrice || i.price || 0);
+        totalCost += getItemCost(i);
       });
 
       renderChart();
@@ -863,9 +893,9 @@
     function generateReportPayload() {
       const car = getSelectedCar();
       const logs = getFilteredLogs();
-      let totalCost = logs.reduce((acc, i) => acc + parseFloat(i.totalPrice || i.price || 0), 0);
+      let totalCost = logs.reduce((acc, i) => acc + getItemCost(i), 0);
       let totalKwh = logs.reduce((acc, i) => acc + parseFloat(i.kwh || 0), 0);
-      const periodName = currentFilter === 'all' ? 'Всё время' : currentFilter;
+      const periodName = currentFilter === 'all' ? 'Всё время' : (currentFilter === 'current' ? 'Этот месяц' : currentFilter);
 
       const reportText = `📊 Сводный отчет EV Garage\n🚗 Авто: ${car.name}\n👤 Владелец: ${car.owner_name || car.ownerName || 'Водитель'}\n📅 Период: ${periodName}\n\n• Сессий зарядок: ${logs.length}\n• Заряжено энергии: ${totalKwh.toFixed(1)} кВт⋅ч\n• Затраты на зарядку: ${Math.round(totalCost)} ₽`;
 
@@ -903,7 +933,9 @@
       let tableText = `Отчет (${currentFilter}): ${car.name}\nДата\tВремя\tЛокация\tЗаряжено (кВт⋅ч)\tТариф (₽)\tИтого (₽)\n`;
       logs.forEach(item => {
         const d = new Date(item.date);
-        tableText += `${d.toLocaleDateString('ru-RU')}\t${d.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'})}\t${item.location || '⚡'}\t${item.kwh}\t${item.rate || '-'}\t${item.totalPrice || item.price || 0}\n`;
+        const timeStr = d.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'});
+        const cost = getItemCost(item);
+        tableText += `${d.toLocaleDateString('ru-RU')}\t${timeStr}\t${item.location || '⚡'}\t${item.kwh}\t${item.rate ?? '-'}\t${cost}\n`;
       });
 
       document.getElementById('exportText').value = tableText;
